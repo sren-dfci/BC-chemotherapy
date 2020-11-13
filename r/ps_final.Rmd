@@ -56,7 +56,7 @@ PoolEstimates <- function(Q, U) {
 }
 
 # load data
-load("C:/Users/sren/Dropbox (Partners HealthCare)/code repository/chemotherapy/r/RData/ps_data.RData")
+ps_data <- read.csv(file.path("C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data", "ps_data.csv"))
 
 best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
 I_surgery + I_neoadjuvant + neo_stage + gadx_surg + gadx_stage"
