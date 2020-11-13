@@ -1,0 +1,31 @@
+{
+    // "editor.codeActionsOnSave": null,
+    "r.bracketedPaste": true,
+    "r.rterm.windows": "C:\\Users\\sren\\anaconda3\\Scripts\\radian.exe", //Use this only for Windows 
+    "r.lsp.path": "C:\\Program Files\\R\\R-4.0.3\\bin\\x64\\R.exe",
+    "r.lsp.debug": true,
+    "r.lsp.diagnostics": true,
+    "r.rterm.option": [
+        "--no-save",
+        "--no-restore",
+        "--r-binary=C:\\Program Files\\R\\R-4.0.3\\bin\\x64\\R.exe"
+    ],
+    "python.linting.pylintArgs": [
+        "--max_line_length=100"
+    ],
+    "python.formatting.autopep8Args": [
+        "--max-line-length=180"
+    ],
+    "python.linting.pylintEnabled": true,
+    "python.linting.enabled": true,
+    "python.linting.ignorePatterns": [
+        ".vscode/*.py",
+        "**/site-packages/**/*.py",
+        "*.R",
+        "*.Rmd"
+    ],
+    "r.linting.maxLineLength": 180,
+    "r.linting.enable": true,
+    "r.linting.camelCase": true
+}
+

@@ -1,0 +1,991 @@
+---
+title: "Chemotherapy during pregnancy"
+output: 
+  html_document:
+    number_sections: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include = TRUE, warning = FALSE, message = FALSE, echo = FALSE)
+```
+
+```{r import data, include = FALSE}
+packages_list <- c('data.table', 'tidyverse', 'kableExtra', 'PSW', 'MASS', 'splines', 'mice') # 'MatchIt', 
+new_packages <- packages_list[!(packages_list %in% installed.packages()[, 'Package'])]
+if(length(new_packages)) install.packages(new_packages)
+suppressMessages(lapply(packages_list, library, character.only=TRUE))
+# load packages and functions needed
+source("functions.R")
+
+extractStdDiff <- function(.psw) {
+  .df <- data.frame(
+    Vars = row.names(.psw$std.diff.before),
+    Before = unname(.psw$std.diff.before[, 5]),
+    After = unname(.psw$std.diff.after[, 5])
+  )
+  .df
+}
+
+extractATE <- function(.psw) {
+  .wt_estimator <- .psw[c("est.risk.wt", "std.risk.wt", "est.rr.wt", "std.rr.wt", "est.or.wt", "std.or.wt")] # list
+  .wt_estimator <- data.frame(matrix(unlist(.wt_estimator), ncol = length(.wt_estimator)))
+  colnames(.wt_estimator) <- c("est.risk.wt", "std.risk.wt", "est.rr.wt", "std.rr.wt", "est.or.wt", "std.or.wt")
+  .wt_estimator
+}
+
+data_folder <- "../data/2020-8-17"
+redcap_data <- fread(file.path(data_folder, "cleaned_data.csv"))
+ps_data <- redcap_data[chemopg == 1 & pregnancy_outcome == "single" & !is.na(gadx), ]
+```
+
+# Propensity score matching 
+<!-- {.tabset .tabset-fade .tabset-pills} -->
+There are two exposures we want to build models for: taxol and GCSF. Only patients who received chemotherapy and gave single birth were included. Possible covariates include: age at diagnosis (`agedx`), gestational age at diagnosis (`gadx`), tumor stage (`I_stage_34`), breast cancer type (`I_TNBC`, `I_HER2`), timing of chemotherapy (`I_neoadjuvant`) and surgery during pregnancy (`I_surgery`). According to Tal, there are several variables that are related to exposure/outcome:
+
+* GCSF - AC chemotherapy
+* Taxol - gestational age at diagnosis, tumor stage
+* Outcomes - gestational age
+
+## Propensity score model for Taxol
+
+For patients who received chemotherapy, there is only one patient received taxol without AC. Adding AC as a covariATE makes the standardized difference very large.
+```{r taxol and acpreg}
+ps_data[, .N, by = c("taxolpreg", "acpreg")] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+```{r modify table 1 vars}
+# variables in Table 1:
+# age, gadx, trimester, cancer stage, cancer type, BRCA1/2 status (mutation), timing (neo/adjuvant), surgery
+# collapse factor levels, normalized numeric vars, and splined them
+
+# normalized age
+ps_data[, age_norm := (agedx - mean(agedx)) / sd(agedx)]
+# spline age
+age_norm_summary <- summary(ps_data$age_norm)
+age_norm_spline <- bs(ps_data$age_norm, knots = age_norm_summary[c(2, 3, 5)]) # 1st quantile, median and 3rd quantile
+colnames(age_norm_spline) <- paste0("age_norm_bs", 1:6)
+ps_data <- cbind(ps_data, age_norm_spline)
+# normalized gestational age
+ps_data[, gadx_norm := (gadx - mean(gadx)) / sd(gadx)]
+# spline gestational age
+gadx_norm_summary <- summary(ps_data$gadx_norm)
+gadx_norm_spline <- bs(ps_data$gadx_norm, knots = gadx_norm_summary[c(2, 3, 5)])
+colnames(gadx_norm_spline) <- paste0("gadx_norm_bs", 1:6)
+ps_data <- cbind(ps_data, gadx_norm_spline)
+# cancer stage
+ps_data[, I_stage_34 := ifelse(stage %in% 3:4, 1, 0)] # collapse 1-2, and 3-4
+# cancer type
+ps_data[, I_TNBC := ifelse(cancer_type == "TNBC", 1, 0)]
+ps_data[, I_HER2 := ifelse(cancer_type == "HER2", 1, 0)]
+# BRCA1/2 
+ps_data[, I_mutation := ifelse(mutation == "Y", 1, 0)] # collapse 0 and unknown
+# chemotherapy timing
+ps_data[, I_neoadjuvant := ifelse(chemo_timing == "neoadjuvant", 1, 0)]
+# surgery
+ps_data[, I_surgery := surgpg]
+
+tbl1_vars <- c("age_norm", "gadx_norm", "I_stage_34", "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery") # used for std.diff check, not covariATEs
+tbl1_splined_vars <- c(paste0("age_norm_bs", 1:6), paste0("gadx_norm_bs", 1:6), "I_stage_34", "I_TNBC", "I_HER2", "I_mutation", "I_neoadjuvant", "I_surgery")
+```
+
+When only including the following covariates in the propensity score model, the standardized differences for other variables in Table 1 do not look very good:
+\[
+logit(taxol) \sim I(stage = 3, 4) * gestational~age \\
+logit(taxol) \sim I(stage = 3, 4) + splined(gestational~age)
+\]
+
+```{r w/o spline few covariates , out.width = '70%', fig.show = 'hide', fig.align = 'center', eval = FALSE}
+# # Propensity score matching using ATE weight
+# psw(
+#   data = as.data.frame(ps_data),
+#   form.ps = taxolpreg ~ I_stage_34 * gadx_norm,
+#   weight = 'ATE',
+#   std.diff = TRUE,
+#   V.name = tbl1_vars
+# ) %>%
+#   extractStdDiff(.) %>% 
+#   knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+#                caption = "ATE weighted standardized difference") %>% 
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+# Propensity score matching using MW weight
+psw(
+  data = as.data.frame(ps_data),
+  form.ps = taxolpreg ~ I_stage_34 * gadx_norm,
+  weight = 'MW',
+  std.diff = TRUE,
+  V.name = tbl1_vars
+) %>%
+  extractStdDiff(.) %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "MW weighted std.diff with few covariATEs") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+
+```{r w/o spline more covariates, out.width = '50%', fig.align = 'center', fig.show = 'hide', include = FALSE}
+# Not include mutation; include timing, surgery, gadx, cancer type and neoadjuvant
+# stage and surgery and timing and gadx_norm (2, 5, 6)
+
+# try all possible combinations
+formula_taxol_1 <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + "
+interaction_terms <- c( # interaction terms
+  "I_neoadjuvant : I_stage_34", "I_surgery : I_stage_34", "I_surgery : I_neoadjuvant", # neoadjuvant, stage and surgery are correlATEd
+  paste0("gadx_norm : ", c("I_surgery", "I_stage_34", "I_TNBC", "I_neoadjuvant")), # gadx relATEd
+  paste0("I_TNBC : ", c("I_surgery", "I_stage_34", "I_neoadjuvant")) # TNBC relATEd
+)
+interaction_combn <- lapply(1:length(interaction_terms), function(i) { # all possible combination of interaction terms
+  combn(interaction_terms, i,
+        function(x) paste0(x, collapse = " + "),
+        simplify = TRUE)
+  }
+) 
+interaction_combn <- do.call(c, interaction_combn) # combine list elements
+forms_taxol <- paste0(formula_taxol_1, interaction_combn)
+
+save(forms_taxol, file = file.path("RData", "forms_taxol.RData"))
+
+# std_diff_ATE_taxol <- list()
+# std_diff_MW_taxol <- list()
+# for (i in 1:length(forms_taxol)) {
+#   std_diff_ATE_taxol[[i]] <- psw(
+#     data = as.data.frame(ps_data),
+#     form.ps = forms_taxol[i],
+#     weight = 'ATE',
+#     std.diff = TRUE,
+#     V.name = tbl1_vars
+#   ) %>%
+#     extractStdDiff(.)
+# 
+#   std_diff_MW_taxol[[i]] <- psw(
+#     data = as.data.frame(ps_data),
+#     form.ps = forms_taxol[i],
+#     weight = 'MW',
+#     std.diff = TRUE,
+#     V.name = tbl1_vars
+#   ) %>%
+#     extractStdDiff(.)
+# }
+# 
+# save(std_diff_ATE_taxol, file = file.path("RData", "std_diff_ATE_taxol.RData"))
+# save(std_diff_MW_taxol, file = file.path("RData", "std_diff_MW_taxol.RData"))
+
+load(file.path("RData", "std_diff_ATE_taxol.RData"))
+load(file.path("RData", "std_diff_MW_taxol.RData"))
+
+# N <- 0
+# for (i in 1:length(std_diff_ATE_taxol)) {
+#   std_diff_after <- std_diff_ATE[[i]]$After # std diff after balance
+#   if (all(abs(std_diff_after) <= 18)) {
+#     N <- N + 1
+#     cat(paste0("Combination ", i, "\n",
+#                  forms_taxol[i], "\n"))
+#   }
+#   if (i == length(std_diff_ATE)) {
+#     cat("\n There are", N, "formulas meet the criteria!")
+#   }
+# }
+# 
+# M <- 99
+# I <- 0
+# for (i in 1:length(std_diff_mw)) {
+#   std_diff_after <- std_diff_mw[[i]]$After
+#   if (max(abs(std_diff_after)) < M) {
+#     M <- max(abs(std_diff_after))
+#     I <- i
+#   }
+# } # I = 72, M = 7.89
+
+## ATE
+# Combination 77
+# taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+# I_neoadjuvant : I_stage_34 + 
+# gadx_norm : I_stage_34 + gadx_norm : I_TNBC
+#            Vars     Before       After
+# 1      age_norm   5.977140   1.3135402
+# 2     gadx_norm -74.262161 -17.8710633
+# 3    I_stage_34  24.820212   7.7505393
+# 4        I_TNBC  -8.120503  11.0909520
+# 5        I_HER2  19.917729   4.5684260
+# 6 I_neoadjuvant  66.479872  -0.3837106
+# 7     I_surgery -40.668972 -17.8147441
+
+# Combination 227
+# taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+# I_neoadjuvant : I_stage_34 + 
+# gadx_norm : I_surgery + gadx_norm : I_stage_34 + 
+# I_TNBC : I_surgery
+#            Vars     Before       After
+# 1      age_norm   5.977140  -0.3255348
+# 2     gadx_norm -74.262161 -15.4548296
+# 3    I_stage_34  24.820212   7.7113636
+# 4        I_TNBC  -8.120503  10.3745635
+# 5        I_HER2  19.917729   3.6890207
+# 6 I_neoadjuvant  66.479872   1.5074954
+# 7     I_surgery -40.668972 -17.9165170
+
+```
+
+I then tried to include more covariates and interaction terms in the model. All possible combinations of interaction terms were tried. When using ATE weight, the best PS matching model is: 
+
+`r forms_taxol[227]`
+
+<!-- The standardized difference table is: -->
+
+```{r taxol ATE std diff table, eval = FALSE}
+best_model_taxol_ate <-  psw(
+  data = ps_data,
+  form.ps = forms_taxol[227],
+  weight = "ATE"
+)
+ps_data[, w_taxol_ate := best_model_taxol_ate$W]
+
+std_diff_ATE_taxol[[227]] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Standardized difference when using ATE weight") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+When using MW weight, the best PS matching model is: 
+
+`r forms_taxol[72]`. 
+
+The standardized difference table is:
+
+```{r taxol MW std diff table}
+best_model_taxol_mw <- psw(
+  data = ps_data,
+  form.ps = forms_taxol[72],
+  weight = "MW"
+)
+ps_data[, w_taxol_mw := best_model_taxol_mw$W]
+
+std_diff_MW_taxol[[72]] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Standardized difference when using MW weight") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+## Propensity score model for GCSF
+
+Among patients who received chemotherapy and gave single birth, only one patient didn't receive AC chemotherapy. The same covariates as above were fitted into this model.
+
+```{r GCSF and AC chemotherapy}
+ps_data[, .N, by = c("gfpreg", "acpreg")] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               col.names = c("GCSF", "AC chemotherapy", "N")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+```{r GCSF PS model, out.width = '50%', fig.align = 'center', fig.show = 'hide', include = FALSE}
+# try all possible combinations
+formula_gcsf_1 <- "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + "
+interaction_terms <- c( # interaction terms
+  "I_neoadjuvant : I_stage_34", "I_surgery : I_stage_34", "I_surgery : I_neoadjuvant", # neoadjuvant, stage and surgery are correlATEd
+  paste0("gadx_norm : ", c("I_surgery", "I_stage_34", "I_TNBC", "I_neoadjuvant")), # gadx relATEd
+  paste0("I_TNBC : ", c("I_surgery", "I_stage_34", "I_neoadjuvant")) # TNBC relATEd
+)
+interaction_combn <- lapply(1:length(interaction_terms), function(i) { # all possible combination of interaction terms
+  combn(interaction_terms, i,
+        function(x) paste0(x, collapse = " + "),
+        simplify = TRUE)
+  }
+) 
+interaction_combn <- do.call(c, interaction_combn) # combine list elements
+forms_gcsf <- paste0(formula_gcsf_1, interaction_combn)
+
+save(forms_gcsf, file = file.path("RData", "forms_gcsf.RData"))
+# std_diff_ATE_gcsf <- list()
+# std_diff_MW_gcsf <- list()
+# 
+# for (i in 1:length(forms_gcsf)) {
+#   std_diff_ATE_gcsf[[i]] <- psw(
+#     data = as.data.frame(ps_data),
+#     form.ps = forms_gcsf[i],
+#     weight = 'ATE',
+#     std.diff = TRUE,
+#     V.name = tbl1_vars
+#   ) %>%
+#     extractStdDiff(.)
+# 
+#   std_diff_MW_gcsf[[i]] <- psw(
+#     data = as.data.frame(ps_data),
+#     form.ps = forms_gcsf[i],
+#     weight = 'MW',
+#     std.diff = TRUE,
+#     V.name = tbl1_vars
+#   ) %>%
+#     extractStdDiff(.)
+# }
+# 
+# save(std_diff_ATE_gcsf, file = "std_diff_ATE_gcsf.RData")
+# save(std_diff_MW_gcsf, file = "std_diff_MW_gcsf.RData")
+load(file.path("RData", "std_diff_ATE_gcsf.RData"))
+load(file.path("RData", "std_diff_MW_gcsf.RData"))
+
+
+# M <- 99
+# I <- 0
+# for (i in 1:length(std_diff_ATE_gcsf)) {
+#   std_diff_after <- std_diff_ATE_gcsf[[i]]$After
+#   if (max(abs(std_diff_after)) < M) {
+#     M <- max(abs(std_diff_after))
+#     I <- i
+#   }
+# } # I = 793, M = 23.63
+# 
+# M <- 99
+# I <- 0
+# for (i in 1:length(std_diff_mw_gcsf)) {
+#   std_diff_after <- std_diff_mw_gcsf[[i]]$After
+#   if (max(abs(std_diff_after)) < M) {
+#     M <- max(abs(std_diff_after))
+#     I <- i
+#   }
+# } # I = 580, M = 5.32
+
+```
+
+When using ATE weight, the best PS matching model is: 
+
+`r forms_gcsf[793]`. 
+
+<!-- The standardized difference table is: -->
+
+```{r GCSF ATE std diff table, eval = FALSE}
+best_model_gcsf_ate <- psw(
+  data = ps_data,
+  form.ps = forms_gcsf[793],
+  weight = "ATE"
+)
+ps_data[, w_gcsf_mw := best_model_gcsf_ate$W]
+
+std_diff_ATE_gcsf[[793]] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Standardized difference when using ATE weight") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+When using MW weight, the best PS matching model is: 
+
+`r forms_gcsf[580]`. 
+
+The standardized difference table is:
+
+```{r GCSF MW std diff table}
+best_model_gcsf_mw <- psw(
+  data = ps_data,
+  form.ps = forms_gcsf[580],
+  weight = "MW"
+)
+ps_data[, w_gcsf_mw := best_model_gcsf_mw$W]
+
+
+std_diff_MW_gcsf[[580]] %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Standardized difference when using MW weight") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+# Average treatment effect
+
+Due to a low event rate. Statistical analysis will only be performed for the composite outcomes. There are two ways to define composite outcomes:
+
+* Primary analysis: Composite outcome = missing only if all components are missing
+* Sensitivity analysis: Composite outcome = missing if any of the components are missing
+
+```{r composite outcomes}
+# primary analysis: composite outcome is missing only if all individual outcomes are missing
+ps_data$obstetrical <- apply(
+  ps_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
+  1,
+  function(x) {
+    ifelse(all(is.na(x)), # if all invidual outcomes are NA
+           NA, # define as NA
+           as.numeric(sum(x, na.rm = TRUE) > 0)) # else will be either 0 or 1
+  }
+)
+
+ps_data$gestational <- apply(
+  ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
+  1,
+  function(x) {
+    ifelse(all(is.na(x)),
+           NA,
+           as.numeric(sum(x, na.rm = TRUE) > 0))
+  }
+)
+
+# sensitivity analysis: composite outcome is missing if any individual outcome is missing
+ps_data$obstetrical_sens <- apply(
+  ps_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
+  1,
+  function(x) {
+    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1 
+           1, # define as 1 
+           ifelse(sum(is.na(x)) > 0, # else if any is NA  
+                  NA, # define as NA 
+                  0)) 
+  } 
+) 
+
+ps_data$gestational_sens <- apply( 
+ ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],  
+ 1, 
+ function(x) { 
+   ifelse(sum(x, na.rm = TRUE) > 0, 
+          1,  
+          ifelse(sum(is.na(x)) > 0, 
+                 NA, 
+                 0)) 
+   } 
+) 
+```
+
+```{r composite outcomes missing}
+rbind(
+  factorStats(ps_data[, .(obstetrical)], useNA = "ifany"),
+  factorStats(ps_data[, .(gestational)], useNA = "ifany"),
+  factorStats(ps_data[, .(obstetrical_sens)], useNA = "ifany"),
+  factorStats(ps_data[, .(gestational_sens)], useNA = "ifany")
+) %>%
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Summary statistics for compostie outcomes") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+## Average treatment effect of taxol on completed cases
+
+```{r ATE taxol complete, fig.show = 'hide'}
+# psw does not support interaction terms when calculating ATE
+# based on forms_taxol[227]: taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + I_neoadjuvant : I_stage_34 + gadx_norm : I_surgery + gadx_norm : I_stage_34 + I_TNBC : I_surgery
+ps_data[, neo_stage := I_neoadjuvant * I_stage_34]
+ps_data[, gadx_surg := gadx_norm * I_surgery]
+ps_data[, gadx_stage := gadx_norm * I_stage_34]
+ps_data[, tnbc_surg := I_TNBC * I_surgery]
+ps_data[, surg_stage := I_surgery * I_stage_34]
+ps_data[, gadx_tnbc := gadx_norm * I_TNBC]
+ps_data[, tnbc_stage := I_TNBC * I_stage_34]
+ps_data[, tnbc_neo := I_TNBC * I_neoadjuvant]
+ps_data[, surg_neo := I_surgery * I_neoadjuvant]
+
+# save(ps_data, file = file.path("RData", "ps_data.RData"))
+
+taxol_best_formulas <- list(
+  ATE = "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+                neo_stage + gadx_surg + gadx_stage + tnbc_surg",
+  MW = "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+                neo_stage + gadx_surg + gadx_stage"
+)
+
+gcsf_best_formulas <- list(
+  ATE = "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+                surg_stage + surg_neo + gadx_stage + tnbc_surg + tnbc_stage + tnbc_neo",
+  MW = "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + 
+                surg_stage + gadx_tnbc + tnbc_surg + tnbc_stage + tnbc_neo"
+)
+
+ATE_taxol_complete <- sapply(c("ATE", "MW"), function(w) {
+  sapply(
+    c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"), 
+    function(outc) {
+      .psw <- psw(data = as.data.frame(ps_data[!is.na(get(outc)), ]),
+                  form.ps = taxol_best_formulas[[w]],
+                  weight = w, 
+                  wt = TRUE,
+                  out.var = outc,
+                  family = "binomial")
+      .ATE <- extractATE(.psw) # return a data frame
+      colnames(.ATE) <- c("est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or")
+      .ATE
+      },
+    simplify = FALSE, USE.NAMES = TRUE
+  ) %>%
+    rbindlist(., idcol = "outcome")
+},
+simplify = FALSE, USE.NAMES = TRUE)
+
+
+# ATE_taxol_complete$ATE %>% 
+#   knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+#                caption = "Average treatment effect of taxol on completed cases with ATE weight") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+ATE_taxol_complete$MW %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Average treatment effect of taxol on completed cases with MW weight") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+```
+
+## Average treatment effect of taxol on multiple imputed cases
+
+```{r ATE taxol impute, results = 'hide'}
+# ATE_taxol_imputed <- sapply(
+#   c("ATE", "MW"), 
+#   function(w) {
+#     .data <- ps_data
+#     sapply(
+#       c("gestational", "obstetrical_sens", "gestational_sens"),
+#       function(outc) {
+#         .sub_data <- ps_data[, .SD, .SDcols = c(tbl1_vars, outc)]
+#         .fit <- mice(
+#           data = .sub_data,
+#           m = 10, # number of MIs
+#           maxit = 50, # iteration
+#           seed = 42,
+#           method = "pmm"
+#         )
+#         sapply(1:10, function(i) {
+#             imputed_outc <- mice::complete(.fit, i)[[outc]]
+#             .data[[outc]] <- imputed_outc
+#             .psw <- psw(
+#               data = as.data.frame(.data),
+#               form.ps = taxol_best_formulas[[w]],
+#               weight = w,
+#               wt = TRUE, 
+#               out.var = outc,
+#               family = "binomial"
+#             )
+#             .ATE <- extractATE(.psw) # return a data frame
+#             colnames(.ATE) <- c("est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or")
+#             .ATE
+#           },
+#           simplify = FALSE, USE.NAMES = TRUE) %>% 
+#           rbindlist(., idcol = "i")
+#       },
+#       simplify = FALSE, USE.NAMES = TRUE) %>% 
+#       rbindlist(., idcol = "outcome")
+#   },
+#   simplify = FALSE, USE.NAMES = TRUE
+# )
+# 
+# save(ATE_taxol_imputed, file = "ATE_taxol_imputed.RData")
+
+load(file.path("RData", "ATE_taxol_imputed.RData"))
+
+
+```
+
+```{r ATE taxol impute pool}
+# pool MI results
+# https://stats.idre.ucla.edu/wp-content/uploads/2016/02/multipleimputation.pdf
+PoolEstimates <- function(Q, U) {
+  # Q is point estimate
+  # U is variance estimate
+  if (length(Q) != length(U)) {
+    stop("Q and U are of different length")
+  }
+
+  m <- length(Q)
+  Q_bar <- mean(Q)
+  U_bar <- mean(U) # within-imputation variance
+  B <- var(Q) # between-imputation variance
+  tt <- U_bar + (1 + 1 / m) * B # total variance
+  # vm <- (m - 1) * (1 + U_bar / ((1 + 1 / m) * B)) ^ 2 # degree of freedom
+  .tmp <- c(Q_bar, tt)
+  names(.tmp) <- c("Q_bar", "total_variance")
+  return(.tmp)
+}
+
+ATE_taxol_pool <- lapply(ATE_taxol_imputed, function(d) {
+  d %>% group_by(outcome) %>% 
+    summarise(est.risk = PoolEstimates(est_risk, std_risk)[1],
+            std.risk = sqrt(PoolEstimates(est_risk, std_risk)[2]),
+            est.rr = PoolEstimates(est_rr, std_rr)[1],
+            std.rr = sqrt(PoolEstimates(est_rr, std_rr)[2]),
+            est.or = PoolEstimates(est_or, std_or)[1],
+            std.or = sqrt(PoolEstimates(est_or, std_or)[2]))
+})
+
+# ATE_taxol_pool$ATE[c(1, 3, 2), ] %>%
+#   knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+#                col.names = c("outcome", "est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or"),
+#                caption = "Average treatment effect of taxol on imputed cases with ATE weight") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+ATE_taxol_pool$MW[c(1, 3, 2), ] %>%
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               col.names = c("outcome", "est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or"),
+               caption = "Average treatment effect of taxol on imputed cases with MW weight") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+## Average treatment effect of GCSF on completed cases
+
+```{r ATE GCSF complete, fig.show = 'hide'}
+ATE_gcsf_complete <- sapply(c("ATE", "MW"), function(w) {
+  sapply(
+    c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"), 
+    function(outc) {
+      .psw <- psw(data = as.data.frame(ps_data[!is.na(get(outc)), ]),
+                  form.ps = gcsf_best_formulas[[w]],
+                  weight = w, 
+                  wt = TRUE,
+                  out.var = outc,
+                  family = "binomial")
+      .ATE <- extractATE(.psw) # return a data frame
+      colnames(.ATE) <- c("est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or")
+      .ATE
+      },
+    simplify = FALSE, USE.NAMES = TRUE
+  ) %>%
+    rbindlist(., idcol = "outcome")
+},
+simplify = FALSE, USE.NAMES = TRUE)
+
+# ATE_gcsf_complete$ATE %>% 
+#   knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+#                caption = "Average treatment effect of GCSF on completed cases with ATE weight") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+ATE_gcsf_complete$MW %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Average treatment effect of GCSF on completed cases with MW weight") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+## Average treatment effect of GCSF on multiple imputed cases
+
+```{r ATE GCSF impute, fig.show = 'hide'}
+# ATE_gcsf_imputed <- sapply(
+#   c("ATE", "MW"),
+#   function(w) {
+#     .data <- ps_data
+#     sapply(
+#       c("gestational", "obstetrical_sens", "gestational_sens"),
+#       function(outc) {
+#         .sub_data <- ps_data[, .SD, .SDcols = c(tbl1_vars, outc)]
+#         .fit <- mice(
+#           data = .sub_data,
+#           m = 10, # number of MIs
+#           maxit = 50, # iteration
+#           seed = 42,
+#           method = "pmm"
+#         )
+#         sapply(1:10, function(i) {
+#             imputed_outc <- mice::complete(.fit, i)[[outc]]
+#             .data[[outc]] <- imputed_outc
+#             .psw <- psw(
+#               data = as.data.frame(.data),
+#               form.ps = gcsf_best_formulas[[w]],
+#               weight = w,
+#               wt = TRUE,
+#               out.var = outc,
+#               family = "binomial"
+#             )
+#             .ATE <- extractATE(.psw) # return a data frame
+#             colnames(.ATE) <- c("est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or")
+#             .ATE
+#           },
+#           simplify = FALSE, USE.NAMES = TRUE) %>%
+#           rbindlist(., idcol = "i")
+#       },
+#       simplify = FALSE, USE.NAMES = TRUE) %>%
+#       rbindlist(., idcol = "outcome")
+#   },
+#   simplify = FALSE, USE.NAMES = TRUE
+# )
+# 
+# save(ATE_gcsf_imputed, file = "ATE_gcsf_imputed.RData")
+
+load(file.path("RData", "ATE_gcsf_imputed.RData"))
+
+
+```
+
+```{r}
+ATE_gcsf_pool <- lapply(ATE_gcsf_imputed, function(d) {
+  d %>% group_by(outcome) %>% 
+    summarise(est.risk = PoolEstimates(est_risk, std_risk)[1],
+            std.risk = sqrt(PoolEstimates(est_risk, std_risk)[2]),
+            est.rr = PoolEstimates(est_rr, std_rr)[1],
+            std.rr = sqrt(PoolEstimates(est_rr, std_rr)[2]),
+            est.or = PoolEstimates(est_or, std_or)[1],
+            std.or = sqrt(PoolEstimates(est_or, std_or)[2]))
+})
+
+
+# ATE_gcsf_pool$ATE[c(1, 3, 2), ] %>%
+#   knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+#                col.names = c("outcome", "est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or"),
+#                caption = "Average treatment effect of GCSF on imputed cases with ATE weight") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+
+ATE_gcsf_pool$MW[c(1, 3, 2), ] %>%
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               col.names = c("outcome", "est_risk", "std_risk", "est_rr", "std_rr", "est_or", "std_or"),
+               caption = "Average treatment effect of GCSF on imputed cases with MW weight") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+```{r, eval = FALSE}
+# tbl3_outc <- c("sptb", "pprom", "gdm", "pih", "chorio", "sga", "apgar5v7", "anomalies", "gestational", "obstetrical")
+tbl3_outc <- c("gestational", "obstetrical")
+
+# outcome ~ taxol + 1 covariate
+conditional_model_taxol <- sapply(tbl3_outc, function(outc) {
+  w <- ps_data[["w_taxol_mw"]]
+  sapply(tbl1_vars, function(x) {
+    f <- as.formula(paste0(tbl3_outc, " ~ taxolpreg + ", x))
+    .glm <- glm(f, family = binomial, data = ps_data, weights = w)
+    return(summary(.glm))
+  }, 
+  simplify = FALSE, USE.NAMES = TRUE)
+}, 
+simplify = FALSE, USE.NAMES = TRUE)
+# outcome ~ gcsf + 1 covariate
+conditional_model_gcsf <- sapply(tbl3_outc, function(outc) {
+  w <- ps_data[["w_gcsf_mw"]]
+  sapply(tbl1_vars, function(x) {
+    f <- as.formula(paste0(tbl3_outc, " ~ gfpreg + ", x))
+    .glm <- glm(f, family = binomial, data = ps_data, weights = w)
+    return(summary(.glm))
+  }, 
+  simplify = FALSE, USE.NAMES = TRUE)
+}, 
+simplify = FALSE, USE.NAMES = TRUE)
+
+# calculate odds ratio of treatment effect
+sapply(conditional_model_taxol, function(outc) {
+  sapply(outc, function(.cov) {
+    .coef <- .cov$coefficients["taxolpreg", c("Estimate", "Pr(>|z|)")]
+    .coef[1] <- exp(.coef[1]) # odds ratio
+    return(data.frame(odds.ratio = .coef[1],
+                      p.value = .coef[2]))
+  }, 
+  simplify = FALSE, USE.NAMES = TRUE) %>% 
+    rbindlist(., idcol = "Covariate")
+},
+simplify = FALSE, USE.NAMES = TRUE) %>% 
+  rbindlist(., idcol = "Outcome") %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Odds ratio and p-value for taxol treatment",
+               col.names = c("Outcome", "Covariate", "Odds ratio (Taxol)", "P value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center") %>% 
+  collapse_rows(columns = 1, valign = "top")
+
+sapply(conditional_model_gcsf, function(outc) {
+  sapply(outc, function(.cov) {
+    .coef <- .cov$coefficients["gfpreg", c("Estimate", "Pr(>|z|)")]
+    .coef[1] <- exp(.coef[1]) # odds ratio
+    return(data.frame(odds.ratio = .coef[1],
+                      p.value = .coef[2]))
+  }, 
+  simplify = FALSE, USE.NAMES = TRUE) %>% 
+    rbindlist(., idcol = "Covariate")
+},
+simplify = FALSE, USE.NAMES = TRUE) %>% 
+  rbindlist(., idcol = "Outcome") %>% 
+  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
+               caption = "Odds ratio and p-value for gcsf treatment",
+               col.names = c("Outcome", "Covariate", "Odds ratio (GCSF)", "P value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center") %>% 
+  collapse_rows(columns = 1, valign = "top")
+
+```
+
+```{r unused, out.width = '50%', fig.align = 'center', eval = FALSE, include = FALSE}
+# w/ spline few covariates
+# original scale
+gadx_summary <- summary(ps_data$gadx)
+spline_gadx <- bs(ps_data$gadx, knots = gadx_summary[c(2, 3, 5)]) # 1st quantile, median and 3rd quantile
+colnames(spline_gadx) <- paste0("gadx_bs", 1:6)
+ps_data <- cbind(ps_data, spline_gadx)
+# normalized
+gadx_norm_summary <- summary(ps_data$gadx_norm)
+spline_gadx_norm <- bs(ps_data$gadx_norm, knots = gadx_norm_summary[c(2, 3, 5)])
+colnames(spline_gadx_norm) <- paste0("gadx_norm_bs", 1:6)
+ps_data <- cbind(ps_data, spline_gadx_norm)
+
+psw_spline <- psw(
+  data = as.data.frame(ps_data),
+  form.ps = taxolpreg ~ stage_3_4 + gadx_norm_bs1 + gadx_norm_bs2 + gadx_norm_bs3 + gadx_norm_bs4 + gadx_norm_bs5 + gadx_norm_bs6,
+  weight = 'ATE',
+  std.diff = TRUE
+)
+
+std_diff_spline <- data.frame(
+  Vars = row.names(psw_spline$std.diff.before),
+  Before = psw_spline$std.diff.before[, 5],
+  After = psw_spline$std.diff.after[, 5]
+)
+rownames(std_diff_spline) <- NULL
+
+knitr::kable(std_diff_spline, align = "l", digits = 2, booktabs = TRUE,
+             caption = "Standardized difference when using splined gestational age") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+
+```
+
+```{r unused code, eval = FALSE}
+MI_outcomes <- c("sptb", "gdm", "pih", "chorio") # PPROM has too many missing; these are obstetrical outcomes
+for (i in MI_outcomes) { # all other variables have no missing
+  md.pattern(ps_data[, .SD, .SDcols = c(tbl_1_factor_vars, tbl_1_num_vars, "taxolpreg", i)])
+}
+
+# as.factor and normalization
+ps_data[, (tbl_1_factor_vars) := lapply(.SD, as.factor), .SDcols = tbl_1_factor_vars]
+ps_data[, (tbl_1_dummy_vars) := lapply(.SD, as.factor), .SDcols = tbl_1_dummy_vars]
+# Formulas
+formula_1 <- formula(paste0("taxolpreg ~ ", paste(tbl_1_factor_vars, collapse = " + "), " + ", paste(tbl_1_num_vars, collapse = " + ")))
+formula_AIC <- stepAIC(glm(formula_dummy, family = binomial, data = ps_data), trace = FALSE)$formula
+# taxolpreg ~ stage4 + cancer_HER2 + timing_neoadjuvant + gcsf_daily + gadx
+# taxolpreg ~ stage4 + timing_neoadjuvant + surgpg0 + gadx
+formula_AIC_plus <- formula("taxolpreg ~ stage1 + stage3 + stage4 + timing_neoadjuvant + surgpg0 + gadx")
+
+# Fitted models
+glm_model_full <- glm(formula_dummy, family = binomial, data = ps_data) # with all dummy variables
+glm_model_AIC <- glm(formula_AIC, family = binomial, data = ps_data) # with only factor levels selected by AIC
+glm_model_AIC_plus <- glm(formula_AIC_plus, family = binomial, data = ps_data) # with factors whose levels are selected by AIC
+# CalculATE propensity score
+ps_data[, ps_score_full := predict(glm_model_full, type = "response")]
+ps_data[, ps_score_AIC := predict(glm_model_AIC, type = "response")]
+ps_data[, ps_score_AIC_plus := predict(glm_model_AIC_plus, type = "response")]
+
+calibration.plot(ps_data$taxolpreg, ps_data$ps_score_full) # ps_score_full performs the best
+calibration.plot(ps_data$taxolpreg, ps_data$ps_score_AIC)
+calibration.plot(ps_data$taxolpreg, ps_data$ps_score_AIC_plus)
+
+prob.hist(ps_data$taxolpreg, ps_data$ps_score_full) # the same as above
+prob.hist(ps_data$taxolpreg, ps_data$ps_score_AIC)
+prob.hist(ps_data$taxolpreg, ps_data$ps_score_AIC_plus)
+
+
+# taxolpreg ~ stage1 + stage3 + stage4 + cancer_HER2 + cancer_TNBC + timing_neoadjuvant + gcsf_daily + gcsf_depot + gadx
+ps_data[, ps_score_AIC_plus := predict(glm_model_AIC_plus, type = "response")]
+ps_data[, ps_score_AIC := predict(glm_model_AIC, type = "response")]
+ps_data[, sptb1 := ifelse(is.na(sptb), 1, sptb)]
+ps_data[, sptb0 := ifelse(is.na(sptb), 0, sptb)]
+ps_data[, pprom1 := ifelse(is.na(pprom), 1, pprom)]
+ps_data[, pprom0 := ifelse(is.na(pprom), 0, pprom)]
+ps_data[, gdm1 := ifelse(is.na(gdm), 1, gdm)]
+ps_data[, gdm0 := ifelse(is.na(gdm), 0, gdm)]
+ps_data[, pih1 := ifelse(is.na(pih), 1, pih)]
+ps_data[, pih0 := ifelse(is.na(pih), 0, pih)]
+ps_data[, sga1 := ifelse(is.na(sga), 1, sga)]
+ps_data[, sga0 := ifelse(is.na(sga), 0, sga)]
+ps_data[, apgar1 := ifelse(is.na(apgar5v7), 1, apgar5v7)]
+ps_data[, apgar0 := ifelse(is.na(apgar5v7), 0, apgar5v7)]
+ps_data[, anomalies1 := ifelse(is.na(anomalies), 1, anomalies)]
+ps_data[, anomalies0 := ifelse(is.na(anomalies), 0, anomalies)]
+
+single_outcome <- c("sptb1", "sptb0", "pprom1", "pprom0", "gdm1", "gdm0", "pih1", "pih0", "sga1", "sga0", "apgar1",
+                    "apgar0", "anomalies1", "anomalies0")
+sensitivity_analysis <- setNames(data.frame(matrix(ncol = 2, nrow = 0)), c("Variable", "ATE"))
+for (i in single_outcome) {
+  sensitivity_analysis <- rbind(
+    sensitivity_analysis,
+    data.frame(Variable = i,
+               ATE = weighted.mean(ps_data[[i]][ps_data$taxolpreg == 1], ps_data[taxolpreg == 1, 1 / ps_score_AIC_plus]) -
+                 weighted.mean(ps_data[[i]][ps_data$taxolpreg == 0], ps_data[taxolpreg == 0, 1 / (1 - ps_score_AIC_plus)])))
+}
+
+sptb_p0 <- ggplot(ps_data, aes(x = factor(sptb0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(title = "", x = "NA as 0", y = "Propensity score")
+sptb_p1 <- ggplot(ps_data, aes(x = factor(sptb1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(sptb_p0, sptb_p1, ncol = 2, nrow = 1)
+
+pprom_p0 <- ggplot(ps_data, aes(x = factor(pprom0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+pprom_p1 <- ggplot(ps_data, aes(x = factor(pprom1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(pprom_p0, pprom_p1, ncol = 2, nrow = 1)
+
+gdm_p0 <- ggplot(ps_data, aes(x = factor(gdm0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+gdm_p1 <- ggplot(ps_data, aes(x = factor(gdm1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(gdm_p0, gdm_p1, ncol = 2, nrow = 1)
+
+pih_p0 <- ggplot(ps_data, aes(x = factor(pih0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+pih_p1 <- ggplot(ps_data, aes(x = factor(pih1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(pih_p0, pih_p1, ncol = 2, nrow = 1)
+
+sga_p0 <- ggplot(ps_data, aes(x = factor(sga0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+sga_p1 <- ggplot(ps_data, aes(x = factor(sga1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(sga_p0, sga_p1, ncol = 2, nrow = 1)
+
+apgar_p0 <- ggplot(ps_data, aes(x = factor(apgar0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+apgar_p1 <- ggplot(ps_data, aes(x = factor(apgar1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(apgar_p0, apgar_p1, ncol = 2, nrow = 1)
+
+anomalies_p0 <- ggplot(ps_data, aes(x = factor(anomalies0), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 0", y = "Propensity score")
+anomalies_p1 <- ggplot(ps_data, aes(x = factor(anomalies1), y = ps_score_AIC_plus)) + geom_boxplot() + theme_bw() + labs(x = "NA as 1", y = "Propensity score")
+grid.arrange(anomalies_p0, anomalies_p1, ncol = 2, nrow = 1)
+
+# Check selected covariATEs
+ggplot(ps_data, aes(x = factor(taxolpreg), fill = factor(stage))) + geom_bar(position = "fill") + theme_bw() +
+  labs(title = "Compare distribution of cancer stages in different groups", x = "Taxol chemotherapy", y = "Percentage", fill = "Cancer stage")
+ggplot(ps_data, aes(x = factor(taxolpreg), fill = factor(cancer_type))) + geom_bar(position = "fill") + theme_bw() +
+  labs(title = "Compare distribution of cancer types in different groups", x = "Taxol chemotherapy", y = "Percentage", fill = "Cancer type")
+ggplot(ps_data, aes(x = factor(taxolpreg), fill = factor(chemo_timing))) + geom_bar(position = "fill") + theme_bw() +
+  labs(title = "Compare distribution of chemotherapy timing in different groups", x = "Taxol chemotherapy", y = "Percentage", fill = "Timing")
+ggplot(ps_data, aes(x = factor(taxolpreg), fill = factor(gcsf))) + geom_bar(position = "fill") + theme_bw() +
+  labs(title = "Compare distribution of GCSF treatment in different groups", x = "Taxol chemotherapy", y = "Percentage", fill = "GCSF")
+ggplot(ps_data, aes(x = factor(taxolpreg), y = gadx)) + geom_boxplot() + theme_bw() +
+  labs(title = "Compare distribution of gestational age in different groups", x = "Taxol chemotherapy", y= "Gestational age at diagnosis")
+# ggplot(ps_data, aes(x = gadx, color = factor(taxolpreg))) + geom_density(aes(fill = factor(taxolpreg)), alpha = 0.5)
+# Standardized difference
+std_diff_table <- bind_rows(
+  StdDiff(ps_data$taxolpreg, ps_data$stage, type = "cATEgory"),
+  StdDiff(ps_data$taxolpreg, ps_data$cancer_type, type = "cATEgory"),
+  StdDiff(ps_data$taxolpreg, ps_data$chemo_timing, type = "binary"),
+  StdDiff(ps_data$taxolpreg, ps_data$gcsf, type = "cATEgory"),
+  StdDiff(ps_data$taxolpreg, ps_data$gadx, type = "numeric")
+)
+std_diff_table <- bind_cols(Variable = c("stage", "cancer type", "chemotherapy timing", "GCSF", "gadx"),
+                            std_diff_table)
+
+# Weighted PS matching
+ps_matching_AIC <- psw(
+  as.data.frame(ps_data),
+  form.ps = formula_AIC, std.diff = TRUE,
+  # stage4 + cancer_HER2 + timing_neoadjuvant + gcsf_daily + gadx
+  V.name = c("stage4", "cancer_HER2", "timing_neoadjuvant", "gcsf_daily", "gadx"),
+  mirror.hist = TRUE, weight = "MW", family = "binomial"
+) # psw function only contains the vars used and cATEgory vars need to be converted to dummy
+ps_matching_AIC_plus <- psw(
+  as.data.frame(ps_data), form.ps = formula_AIC_plus, weight = "MW", std.diff = TRUE,
+  V.name = c("stage1", "stage3", "stage4", "cancer_HER2", "cancer_TNBC", "timing_neoadjuvant",
+             "gcsf_daily", "gcsf_depot", "gadx"),
+  mirror.hist = TRUE, family = "binomial" # add.weight = TRUE,
+)
+# unweighted PS score matching in three ways
+unweighted_nn_1 <- matchit(ps_formula, data = ps_model_data, method = "nearest", ratio = 1)
+unweighted_nn_2 <- matchit(ps_formula, data = ps_model_data, method = "nearest", ratio = 2)
+unweighted_nn_3 <- matchit(ps_formula, data = ps_model_data, method = "nearest", ratio = 2, replace = TRUE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
