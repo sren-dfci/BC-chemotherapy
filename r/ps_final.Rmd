@@ -10,16 +10,10 @@ knitr::opts_chunk$set(include = TRUE, warning = FALSE, message = FALSE, echo = F
 ```
 
 ```{r import data, include = FALSE}
-packages_list <- c('data.table', 'tidyverse', 'kableExtra', 'PSW', 'MASS', 'sandwich', 'mice') # 'MatchIt', 
-new_packages <- packages_list[!(packages_list %in% installed.packages()[, 'Package'])]
-if(length(new_packages)) install.packages(new_packages)
-suppressMessages(lapply(packages_list, library, character.only=TRUE))
-
-data_path <- "boc/chemotherapy/data"
-code_path <- "boc/chemotherapy/r"
-
-# load packages and functions needed
-source(file.path(code_path, "functions.R"))
+packages_list <- c("data.table", "tidyverse", "kableExtra", "PSW", "MASS", "sandwich", "mice") # 'MatchIt',
+new_packages <- packages_list[!(packages_list %in% installed.packages()[, "Package"])]
+if (length(new_packages)) install.packages(new_packages)
+suppressMessages(lapply(packages_list, library, character.only = TRUE))
 
 select <- dplyr::select
 rbind <- base::rbind
@@ -62,7 +56,7 @@ PoolEstimates <- function(Q, U) {
 }
 
 # load data
-load(file.path(code_path, "RData", "ps_data.RData"))
+load("C:/Users/sren/Dropbox (Partners HealthCare)/code repository/chemotherapy/r/RData/ps_data.RData")
 
 best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
 I_surgery + I_neoadjuvant + neo_stage + gadx_surg + gadx_stage"
@@ -71,8 +65,10 @@ best_formula_gcsf <- "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
 I_surgery + I_neoadjuvant + surg_stage + gadx_tnbc + tnbc_surg +
 tnbc_stage + tnbc_neo"
 
-tbl1_vars <- c("age_norm", "gadx_norm", "I_stage_34",
-"I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery")
+tbl1_vars <- c(
+  "age_norm", "gadx_norm", "I_stage_34",
+  "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery"
+)
 ```
 
 In randomized experiments, subjects are randomly assigned to each treatment group so that each covariate is balanced across groups. However, in observational studies, the assignment of treatments is not random. Some of the covariates could affect the decision of treatment, which causes the observed difference in the treatment outcome can not be fully attributed to the treatment effect. Propensity score matching is a method that attempts to estimate the probability of receiving treatment for each subject. Based on the estimated treatment probability, subjects are assigned different weights to reduce this bias. The difference in the treatment outcome is then comparable.
@@ -106,16 +102,45 @@ best_model_gcsf <- psw(
 
 # output of glm model
 taxol_coefs <- as.data.frame(summary(best_model_taxol$ps.model)$coefficients)
+taxol_coefs$covariate <- c(
+  "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
+  "Neoadjuvant", "Neoadjuvant*Stage", "Gestational age*Surgery",
+  "Gestational age*Stage"
+)
 taxol_coefs %>%
   mutate(
     est.or = exp(Estimate),
     lower = exp(Estimate - 1.96 * `Std. Error`),
     upper = exp(Estimate + 1.96 * `Std. Error`),
-    CI = paste0("(", lower, " ", upper, ")")
   ) %>%
-  select(est.or, CI, `Pr(>|z|)`) %>%
-  kable(digits = 2, 
-  row.names = c())
+  select(covariate, est.or, lower, upper, `Pr(>|z|)`) %>%
+  kable(
+    digits = 2,
+    col.names = c("Covariate", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI", "P-value"),
+    caption = "Estimated coefficients for the taxane propensity score model"
+  ) %>% 
+  kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
+
+gcsf_coefs <- as.data.frame(summary(best_model_gcsf$ps.model)$coefficients)
+gcsf_coefs$covariate <- c(
+  "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
+  "Neoadjuvant", "Surgery*Stage", "Gestational*TNBC", "TNBC*Surgery",
+  "TNBC*Stage", "TNBC*Neoadjuvant"
+)
+gcsf_coefs %>%
+  mutate(
+    est.or = exp(Estimate),
+    lower = exp(Estimate - 1.96 * `Std. Error`),
+    upper = exp(Estimate + 1.96 * `Std. Error`),
+  ) %>%
+  select(covariate, est.or, lower, upper, `Pr(>|z|)`) %>%
+  kable(
+    digits = 2,
+    col.names = c("Covariate", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI", "P-value"),
+    caption = "Estimated coefficients for the CSF propensity score model"
+  ) %>% 
+  kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
+
 ```
 
 # Average treatment effect model
@@ -124,7 +149,8 @@ The treatment effect of taxane\/CSF to obstetrical\/gestational outcomes could b
 
 1. If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative, the composite outcome is negative; else it's missing
 2. If any individual outcome is positive, the composite outcome is positive; if all individual outcome is negative, the composite outcome is negative; else it's missing
-3. Impute missingness in each individual outcome using multiple imputation (MI) method, then create composite outcomes the same way as method 1. For each individual outcome, we used 10 multiple imputations, with 25 iterations for each.
+3. Generate composite outcomes the same way as method 1, then use multiple imputation (MI) method to impute missingness. For each composite outcome, 10 copies of the original dataset is created, then a regression model is fitted to predict missing values from complete cases. This process is iterated 25 times, updating regression parameters after each iteration. The formula is: \
+composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(type = HER2) + I(timing = neoadjuvant) + I(surgery)
 
 ```{r create composite outcomes, include = FALSE}
 # primary analysis: composite outcome is missing only if all individual outcomes are missing
@@ -133,8 +159,9 @@ ps_data$obstetrical <- apply(
   1,
   function(x) {
     ifelse(all(is.na(x)), # if all invidual outcomes are NA
-           NA, # define as NA
-           as.numeric(sum(x, na.rm = TRUE) > 0)) # else will be either 0 or 1
+      NA, # define as NA
+      as.numeric(sum(x, na.rm = TRUE) > 0)
+    ) # else will be either 0 or 1
   }
 )
 # sensitivity analysis: composite outcome is missing if any individual outcome is missing
@@ -142,37 +169,44 @@ ps_data$obstetrical_sens <- apply(
   ps_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
   1,
   function(x) {
-    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1 
-           1, # define as 1 
-           ifelse(sum(is.na(x)) > 0, # else if any is NA  
-                  NA, # define as NA 
-                  0)) 
-  } 
-) 
+    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1
+      1, # define as 1
+      ifelse(sum(is.na(x)) > 0, # else if any is NA
+        NA, # define as NA
+        0
+      )
+    )
+  }
+)
 ps_data$gestational <- apply(
   ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
   1,
   function(x) {
     ifelse(all(is.na(x)),
-           NA,
-           as.numeric(sum(x, na.rm = TRUE) > 0))
+      NA,
+      as.numeric(sum(x, na.rm = TRUE) > 0)
+    )
   }
 )
-ps_data$gestational_sens <- apply( 
- ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],  
- 1, 
- function(x) { 
-   ifelse(sum(x, na.rm = TRUE) > 0, 
-          1,  
-          ifelse(sum(is.na(x)) > 0, 
-                 NA, 
-                 0)) 
-   } 
-) 
+ps_data$gestational_sens <- apply(
+  ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
+  1,
+  function(x) {
+    ifelse(sum(x, na.rm = TRUE) > 0,
+      1,
+      ifelse(sum(is.na(x)) > 0,
+        NA,
+        0
+      )
+    )
+  }
+)
 
-## MI 
+## MI
 mice_fit <- {
-  .sub_data <- ps_data[, .SD, .SDcols = c(tbl1_vars, "sptb", "pprom", "gdm", "pih", "chorio", "sga", "apgar5v7", "anomalies")]
+  .sub_data <- ps_data[, .SD,
+    .SDcols = c(tbl1_vars, "obstetrical", "gestational")
+  ]
   # mice object
   .fit <- mice(
     data = .sub_data,
@@ -186,64 +220,50 @@ mice_fit <- {
 # completed datasets
 imputed_data <- mice::complete(mice_fit, "all") # a list
 imputed_data <- lapply(imputed_data, function(d) {
-  # create composite outcomes with imputed individual outcomes
-  d$obstetrical <- apply(
-    d[, c("sptb", "pprom", "gdm", "pih", "chorio")],
-    1,
-    function(x) {
-             as.numeric(sum(x) > 0) 
-      }
-  )
-  d$gestational <- apply(
-    d[, c("sga", "apgar5v7", "anomalies")],
-    1,
-    function(x) {
-      ifelse(all(is.na(x)),
-             NA,
-             as.numeric(sum(x, na.rm = TRUE) > 0))
-    }
-  )
   # add these two treatment variables to each dataset
   d$taxolpreg <- ps_data$taxolpreg
   d$gfpreg <- ps_data$gfpreg
-  return (d)
+  return(d)
 })
 ```
 
 ```{r ATE model}
-ATE_composite <- sapply(c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"), function(outc) {
-  sapply(c("taxolpreg", "gfpreg"), function(trt) {
-    w <<- if (trt == "taxolpreg") ps_data$w_taxol_mw else ps_data$w_gcsf_mw
-    # outc ~ trt
-    .glm <- glm(
-      formula = paste0(outc, " ~ ", trt),
-      family = binomial,
-      data = ps_data, 
-      weights = w
-    )
-    # extract coefs
-    .log_odds <- summary(.glm)$coefficients[trt, "Estimate"]
-    .log_odds_var <- sandwich(.glm)[trt, trt]
-    return(data.frame(
-      est.log.or = .log_odds,
-      std.log.or = sqrt(.log_odds_var))
-    )
-  }, simplify = FALSE, USE.NAMES = TRUE) %>% 
-    rbindlist(., idcol = "Treatment")
-}, simplify = FALSE, USE.NAMES = TRUE) %>%
-  rbindlist(., idcol = "Outcome") %>% 
+ATE_composite <- sapply(
+  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"), function(outc) {
+    sapply(c("taxolpreg", "gfpreg"), function(trt) {
+      w <<- if (trt == "taxolpreg") ps_data$w_taxol_mw else ps_data$w_gcsf_mw
+      # outc ~ trt
+      .glm <- glm(
+        formula = paste0(outc, " ~ ", trt),
+        family = binomial,
+        data = ps_data,
+        weights = w
+      )
+      # extract coefs
+      .log_odds <- summary(.glm)$coefficients[trt, "Estimate"]
+      .log_odds_var <- sandwich(.glm)[trt, trt]
+      return(data.frame(
+        est.log.or = .log_odds,
+        std.log.or = sqrt(.log_odds_var)
+      ))
+    }, simplify = FALSE, USE.NAMES = TRUE) %>%
+      rbindlist(., idcol = "Treatment")
+  },
+  simplify = FALSE, USE.NAMES = TRUE
+) %>%
+  rbindlist(., idcol = "Outcome") %>%
   mutate(
     est.or = exp(est.log.or),
     lower = exp(est.log.or - 1.96 * std.log.or),
     upper = exp(est.log.or + 1.96 * std.log.or)
-  ) %>% 
+  ) %>%
   arrange(Treatment, Outcome)
 
 
 
 ATE_composite_MI <- lapply(imputed_data, function(d) { # iterate over 10 imputed datasets
   # taxane
-  tmp1 <- sapply(c("gestational", "obstetrical"), function(outc) { 
+  tmp1 <- sapply(c("gestational", "obstetrical"), function(outc) {
     # for each composite outcome, build glm, calculate odds ratio, 95% CI
     .glm <- glm(
       paste0(outc, " ~ taxolpreg"),
@@ -257,8 +277,8 @@ ATE_composite_MI <- lapply(imputed_data, function(d) { # iterate over 10 imputed
       log.or = .log_odds,
       log.or.var = .log_odds_var
     ))
-  }, simplify = FALSE, USE.NAMES = TRUE) %>% 
-    rbindlist(., idcol = "Outcome") %>% 
+  }, simplify = FALSE, USE.NAMES = TRUE) %>%
+    rbindlist(., idcol = "Outcome") %>%
     mutate(Treatment = "taxolpreg")
   # GCSF
   tmp2 <- sapply(c("gestational", "obstetrical"), function(outc) {
@@ -274,62 +294,71 @@ ATE_composite_MI <- lapply(imputed_data, function(d) { # iterate over 10 imputed
       log.or = .log_odds,
       log.or.var = .log_odds_var
     ))
-  }, simplify = FALSE, USE.NAMES = TRUE) %>% 
-    rbindlist(., idcol = "Outcome") %>% 
+  }, simplify = FALSE, USE.NAMES = TRUE) %>%
+    rbindlist(., idcol = "Outcome") %>%
     mutate(Treatment = "gfpreg")
-  
   return(rbind(tmp1, tmp2)) # combine taxane and GCSF
-}) %>% 
-  rbindlist(., idcol = "Iter") %>% 
+}) %>%
+  rbindlist(., idcol = "Iter") %>%
   group_by(Treatment, Outcome) %>% # combine results from 10 imputed datasets
   summarise(
     est.log.or = PoolEstimates(log.or, log.or.var)[1],
     std.log.or = sqrt(PoolEstimates(log.or, log.or.var)[2])
-  ) %>% 
+  ) %>%
   mutate(
     est.or = exp(est.log.or), # convert from coef to odds ratio
     lower = exp(est.log.or - 1.96 * std.log.or),
     upper = exp(est.log.or + 1.96 * std.log.or)
-  ) %>% 
-  as.data.frame() %>% 
-  mutate(Outcome = ifelse(Outcome == "obstetrical", 
-                          "obstetrical_imputed", 
-                          "gestational_imputed")
-  )
+  ) %>%
+  as.data.frame() %>%
+  mutate(Outcome = ifelse(Outcome == "obstetrical",
+    "obstetrical_imputed",
+    "gestational_imputed"
+  ))
 
-ATE_overall <- rbind(ATE_composite %>% 
-                       select(Outcome, Treatment, est.or, lower, upper),
-                     ATE_composite_MI %>% 
-                       select(Outcome, Treatment, est.or, lower, upper))
+ATE_overall <- rbind(
+  ATE_composite %>%
+    select(Outcome, Treatment, est.or, lower, upper),
+  ATE_composite_MI %>%
+    select(Outcome, Treatment, est.or, lower, upper)
+)
 
 # For taxane
 # taxane and obstetrical
 ATE_overall %>%
-  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^obs")) %>% 
-  select(Outcome, est.or, lower, upper) %>% 
-  kable(digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
-        caption = "Estimated odds ratio for taxane chemotherapy on composite obstetrical outcomes") %>% 
+  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^obs")) %>%
+  select(Outcome, est.or, lower, upper) %>%
+  kable(
+    digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
+    caption = "Estimated odds ratio for taxane chemotherapy on composite obstetrical outcomes"
+  ) %>%
   kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
 # taxane and gestational
 ATE_overall %>%
-  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^ges")) %>% 
-  select(Outcome, est.or, lower, upper) %>% 
-  kable(digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
-        caption = "Estimated odds ratio for taxane chemotherapy on composite gestational outcomes") %>% 
+  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^ges")) %>%
+  select(Outcome, est.or, lower, upper) %>%
+  kable(
+    digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
+    caption = "Estimated odds ratio for taxane chemotherapy on composite gestational outcomes"
+  ) %>%
   kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
 # GCSF and obstetrical
 ATE_overall %>%
-  filter(Treatment == "gfpreg" & str_detect(Outcome, "^obs")) %>% 
-  select(Outcome, est.or, lower, upper) %>% 
-  kable(digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
-        caption = "Estimated odds ratio for CSF chemotherapy on composite obstetrical outcomes") %>% 
+  filter(Treatment == "gfpreg" & str_detect(Outcome, "^obs")) %>%
+  select(Outcome, est.or, lower, upper) %>%
+  kable(
+    digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
+    caption = "Estimated odds ratio for CSF chemotherapy on composite obstetrical outcomes"
+  ) %>%
   kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
 # GCSF and gestational
 ATE_overall %>%
-  filter(Treatment == "gfpreg" & str_detect(Outcome, "^ges")) %>% 
-  select(Outcome, est.or, lower, upper) %>% 
-  kable(digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
-        caption = "Estimated odds ratio for CSF chemotherapy on composite gestational outcomes") %>% 
+  filter(Treatment == "gfpreg" & str_detect(Outcome, "^ges")) %>%
+  select(Outcome, est.or, lower, upper) %>%
+  kable(
+    digits = 2, col.names = c("Outcome", "Estimated odds ratio", "Lower 95% CI", "Upper 95% CI"),
+    caption = "Estimated odds ratio for CSF chemotherapy on composite gestational outcomes"
+  ) %>%
   kable_classic(full_width = F, position = "center", latex_options = "scale_down", font_size = 12)
 ```
 
