@@ -27,6 +27,10 @@
     "r.linting.maxLineLength": 180,
     "r.linting.enable": true,
     "r.linting.camelCase": true,
-    "editor.wordWrap": "wordWrapColumn"
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 79,
+    "editor.rulers": [
+        80,
+        120
+    ]
 }
-
