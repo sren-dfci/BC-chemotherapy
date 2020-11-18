@@ -74,9 +74,8 @@ PoolEstimates <- function(Q, U) {
 }
 
 # load data
-ps_data <- read.csv(
-  file.path("C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/
-  Chemo during pregnancy (Sella)/data", "ps_data.csv")
+ps_data <- fread(
+  file.path("C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data", "ps_data.csv")
 )
 
 best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
@@ -181,12 +180,13 @@ gcsf_coefs %>%
 
 # Average treatment effect model
 
-The treatment effect of taxane\/CSF to obstetrical\/gestational outcomes could be evaluated by fitting separate weighted logistic regression models. In each model, we evaluate the effect of one treatment on one outcome. Each subject is assigned a weight based on its likelihood to receive treatment under investigation. Since there are many missingness in individual outcomes, we only evaluate treatment effect on composite obstetrical\/gestational outcomes. There are three ways to define composite outcomes:
+The treatment effect of taxane\/CSF to obstetrical\/gestational outcomes could be evaluated by fitting separate weighted logistic regression models. In each model, we evaluate the effect of one treatment on one outcome. Each subject is assigned a weight based on its likelihood to receive treatment under investigation. Since there are many missingness in individual outcomes, we only evaluate treatment effect on composite obstetrical\/gestational outcomes. There are four ways to define composite outcomes:
 
-1. If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative, the composite outcome is negative; else it's missing
-2. If any individual outcome is positive, the composite outcome is positive; if all individual outcome is negative, the composite outcome is negative; else it's missing
+1. If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative and no outcome is positive, the composite outcome is negative; else it's missing
+2. If any individual outcome is positive, the composite outcome is positive; if all individual outcomes are negative, the composite outcome is negative; else it's missing
 3. Generate composite outcomes the same way as method 1, then use multiple imputation (MI) method to impute missingness. For each composite outcome, 10 copies of the original dataset is created, then a regression model is fitted to predict missing values from complete cases. This process is iterated 25 times, updating regression parameters after each iteration. The formula is: \
 composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(type = HER2) + I(timing = neoadjuvant) + I(surgery)
+4. Generate composite outcomes the same way as method 2, then use MI method to impute missingness
 
 ```{r create composite outcomes, include = FALSE}
 # primary analysis: composite outcome is missing only if
@@ -241,28 +241,32 @@ ps_data$gestational_sens <- apply(
 )
 
 ## MI
-mice_fit <- {
-  .sub_data <- ps_data[, .SD,
-    .SDcols = c(tbl1_vars, "obstetrical", "gestational")
-  ]
-  # mice object
-  .fit <- mice(
-    data = .sub_data,
-    m = 10, # number of MIs
-    maxit = 25, # iteration
-    seed = 42,
-    method = "pmm"
-  )
-  .fit
-}
-# completed datasets
-imputed_data <- mice::complete(mice_fit, "all") # a list
-imputed_data <- lapply(imputed_data, function(d) {
-  # add these two treatment variables to each dataset
-  d$taxolpreg <- ps_data$taxolpreg
-  d$gfpreg <- ps_data$gfpreg
-  return(d)
-})
+mice_fit_ls <- sapply(
+  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
+  function(outc) {
+    vars <- c(tbl1_vars, outc)
+    .sub_data <- ps_data[, .SD, .SDcols = vars]
+    # mice object
+    .fit <- mice(
+      data = .sub_data,
+      m = 10, # number of MIs
+      maxit = 25, # iteration
+      seed = 42,
+      method = "pmm"
+    )
+    # imputed datasets
+    imputed <- mice::complete(.fit, "all") # a list
+    # add two treatments two the list
+    imputed <- lapply(imputed, function(.data) {
+      .data$taxolpreg <- ps_data$taxolpreg
+      .data$gfpreg <- ps_data$gfpreg
+      return(.data)
+    })
+    return(imputed)
+  },
+  simplify = FALSE,
+  USE.NAMES = TRUE
+)
 ```
 
 ```{r ATE model}
@@ -298,65 +302,73 @@ ATE_composite <- sapply(
   ) %>%
   arrange(Treatment, Outcome)
 
-
-
-ATE_composite_MI <- lapply(
-  imputed_data, # iterate over 10 imputed datasets
-  function(d) {
-    # taxane
-    tmp1 <- sapply(c("gestational", "obstetrical"), function(outc) {
-      # for each composite outcome, build glm, calculate odds ratio, 95% CI
-      .glm <- glm(
-        paste0(outc, " ~ taxolpreg"),
-        family = binomial,
-        data = d,
-        weights = ps_data$w_taxol_mw
+ATE_composite_MI <- sapply(
+  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
+  function(outc) {
+    .ls <- mice_fit_ls[[outc]]
+    # tmp is a dataframe, with 10 iterations and 2 treatments
+    tmp <- lapply(.ls, function(.data) {
+      # taxane
+      tmp1 <- {
+        .glm <- glm(
+          paste0(outc, " ~ taxolpreg"),
+          family = binomial,
+          data = .data,
+          weights = ps_data$w_taxol_mw
+        )
+        .log_odds <- summary(.glm)$coefficients["taxolpreg", "Estimate"]
+        .log_odds_var <- sandwich(.glm)["taxolpreg", "taxolpreg"]
+        # return
+        data.frame(
+          Treatment = "taxolpreg",
+          log.or = .log_odds,
+          log.or.var = .log_odds_var
+        )
+      }
+      # CSF
+      tmp2 <- {
+        .glm <- glm(
+          paste0(outc, " ~ gfpreg"),
+          family = binomial,
+          data = .data,
+          weights = ps_data$w_gcsf_mw
+        )
+        .log_odds <- summary(.glm)$coefficients["gfpreg", "Estimate"]
+        .log_odds_var <- sandwich(.glm)["gfpreg", "gfpreg"]
+        # return
+        data.frame(
+          Treatment = "gfpreg",
+          log.or = .log_odds,
+          log.or.var = .log_odds_var
+        )
+      }
+      # combine taxane and CSF
+      return(
+        rbind(tmp1, tmp2)
       )
-      .log_odds <- summary(.glm)$coefficients["taxolpreg", "Estimate"]
-      .log_odds_var <- sandwich(.glm)["taxolpreg", "taxolpreg"]
-      return(data.frame(
-        log.or = .log_odds,
-        log.or.var = .log_odds_var
-      ))
-    }, simplify = FALSE, USE.NAMES = TRUE) %>%
-      rbindlist(., idcol = "Outcome") %>%
-      mutate(Treatment = "taxolpreg")
-    # GCSF
-    tmp2 <- sapply(c("gestational", "obstetrical"), function(outc) {
-      .glm <- glm(
-        paste0(outc, " ~ gfpreg"),
-        family = binomial,
-        data = d,
-        weights = ps_data$w_gcsf_mw
-      )
-      .log_odds <- summary(.glm)$coefficients["gfpreg", "Estimate"]
-      .log_odds_var <- sandwich(.glm)["gfpreg", "gfpreg"]
-      return(data.frame(
-        log.or = .log_odds,
-        log.or.var = .log_odds_var
-      ))
-    }, simplify = FALSE, USE.NAMES = TRUE) %>%
-      rbindlist(., idcol = "Outcome") %>%
-      mutate(Treatment = "gfpreg")
-    return(rbind(tmp1, tmp2)) # combine taxane and GCSF
-  }
+    }) %>%
+      rbindlist(., idcol = "Iter")
+    # combine stats over 10 imputed datasets
+    tmp <- tmp %>%
+      group_by(Treatment) %>%
+      summarise(
+        est.log.or = PoolEstimates(log.or, log.or.var)[1],
+        std.log.or = sqrt(PoolEstimates(log.or, log.or.var)[2])
+      ) %>%
+      mutate(
+        est.or = exp(est.log.or), # convert from coef to odds ratio
+        lower = exp(est.log.or - 1.96 * std.log.or),
+        upper = exp(est.log.or + 1.96 * std.log.or)
+      ) %>%
+      as.data.frame()
+    return(tmp)
+  },
+  simplify = FALSE,
+  USE.NAMES = TRUE
 ) %>%
-  rbindlist(., idcol = "Iter") %>%
-  group_by(Treatment, Outcome) %>% # combine results from 10 imputed datasets
-  summarise(
-    est.log.or = PoolEstimates(log.or, log.or.var)[1],
-    std.log.or = sqrt(PoolEstimates(log.or, log.or.var)[2])
-  ) %>%
-  mutate(
-    est.or = exp(est.log.or), # convert from coef to odds ratio
-    lower = exp(est.log.or - 1.96 * std.log.or),
-    upper = exp(est.log.or + 1.96 * std.log.or)
-  ) %>%
-  as.data.frame() %>%
-  mutate(Outcome = ifelse(Outcome == "obstetrical",
-    "obstetrical_imputed",
-    "gestational_imputed"
-  ))
+  rbindlist(., idcol = "Outcome") %>%
+  mutate(Outcome = paste0(Outcome, "_mi")) %>% 
+  arrange(Outcome, Treatment)
 
 ATE_overall <- rbind(
   ATE_composite %>%

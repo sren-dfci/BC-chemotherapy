@@ -1075,12 +1075,13 @@ TNBC*Neoadjuvant
 </div>
 <div id="average-treatment-effect-model" class="section level1">
 <h1><span class="header-section-number">2</span> Average treatment effect model</h1>
-<p>The treatment effect of taxane/CSF to obstetrical/gestational outcomes could be evaluated by fitting separate weighted logistic regression models. In each model, we evaluate the effect of one treatment on one outcome. Each subject is assigned a weight based on its likelihood to receive treatment under investigation. Since there are many missingness in individual outcomes, we only evaluate treatment effect on composite obstetrical/gestational outcomes. There are three ways to define composite outcomes:</p>
+<p>The treatment effect of taxane/CSF to obstetrical/gestational outcomes could be evaluated by fitting separate weighted logistic regression models. In each model, we evaluate the effect of one treatment on one outcome. Each subject is assigned a weight based on its likelihood to receive treatment under investigation. Since there are many missingness in individual outcomes, we only evaluate treatment effect on composite obstetrical/gestational outcomes. There are four ways to define composite outcomes:</p>
 <ol style="list-style-type: decimal">
-<li>If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative, the composite outcome is negative; else it’s missing</li>
-<li>If any individual outcome is positive, the composite outcome is positive; if all individual outcome is negative, the composite outcome is negative; else it’s missing</li>
+<li>If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative and no outcome is positive, the composite outcome is negative; else it’s missing</li>
+<li>If any individual outcome is positive, the composite outcome is positive; if all individual outcomes are negative, the composite outcome is negative; else it’s missing</li>
 <li>Generate composite outcomes the same way as method 1, then use multiple imputation (MI) method to impute missingness. For each composite outcome, 10 copies of the original dataset is created, then a regression model is fitted to predict missing values from complete cases. This process is iterated 25 times, updating regression parameters after each iteration. The formula is:<br />
 composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(type = HER2) + I(timing = neoadjuvant) + I(surgery)</li>
+<li>Generate composite outcomes the same way as method 2, then use MI method to impute missingness</li>
 </ol>
 <table class=" lightable-classic" style="font-size: 12px; font-family: &quot;Arial Narrow&quot;, &quot;Source Sans Pro&quot;, sans-serif; width: auto !important; margin-left: auto; margin-right: auto;">
 <caption style="font-size: initial !important;">
@@ -1133,7 +1134,7 @@ obstetrical_sens
 </tr>
 <tr>
 <td style="text-align:left;">
-obstetrical_imputed
+obstetrical_mi
 </td>
 <td style="text-align:right;">
 3.87
@@ -1143,6 +1144,20 @@ obstetrical_imputed
 </td>
 <td style="text-align:right;">
 25.26
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+obstetrical_sens_mi
+</td>
+<td style="text-align:right;">
+2.12
+</td>
+<td style="text-align:right;">
+0.34
+</td>
+<td style="text-align:right;">
+13.35
 </td>
 </tr>
 </tbody>
@@ -1198,16 +1213,30 @@ gestational_sens
 </tr>
 <tr>
 <td style="text-align:left;">
-gestational_imputed
+gestational_mi
 </td>
 <td style="text-align:right;">
-1.46
+1.26
 </td>
 <td style="text-align:right;">
-0.20
+0.19
 </td>
 <td style="text-align:right;">
-10.83
+8.42
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+gestational_sens_mi
+</td>
+<td style="text-align:right;">
+1.17
+</td>
+<td style="text-align:right;">
+0.16
+</td>
+<td style="text-align:right;">
+8.34
 </td>
 </tr>
 </tbody>
@@ -1263,7 +1292,7 @@ obstetrical_sens
 </tr>
 <tr>
 <td style="text-align:left;">
-obstetrical_imputed
+obstetrical_mi
 </td>
 <td style="text-align:right;">
 4.85
@@ -1273,6 +1302,20 @@ obstetrical_imputed
 </td>
 <td style="text-align:right;">
 19.23
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+obstetrical_sens_mi
+</td>
+<td style="text-align:right;">
+3.86
+</td>
+<td style="text-align:right;">
+0.87
+</td>
+<td style="text-align:right;">
+17.06
 </td>
 </tr>
 </tbody>
@@ -1328,16 +1371,30 @@ gestational_sens
 </tr>
 <tr>
 <td style="text-align:left;">
-gestational_imputed
+gestational_mi
 </td>
 <td style="text-align:right;">
-0.17
+0.14
 </td>
 <td style="text-align:right;">
 0.01
 </td>
 <td style="text-align:right;">
-3.64
+1.94
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+gestational_sens_mi
+</td>
+<td style="text-align:right;">
+0.16
+</td>
+<td style="text-align:right;">
+0.01
+</td>
+<td style="text-align:right;">
+4.06
 </td>
 </tr>
 </tbody>
