@@ -63,11 +63,15 @@ redcap_data[
 redcap_data[ptd == 0, preterm_birth_reason := "Not applicable"]
 
 # Table 3 changes
-redcap_data$apgar5[redcap_data$apgar5 == "6; 7"] <- "6" # ?
-redcap_data$apgar5 <- as.numeric(redcap_data$apgar5)
-redcap_data[, apgar5v7 := as.numeric(apgar5 < 7)]
+# redcap_data$apgar5[redcap_data$apgar5 == "6; 7"] <- "6" # ?
+# redcap_data$apgar5 <- as.numeric(redcap_data$apgar5)
+# redcap_data[, apgar5v7 := as.numeric(apgar5 < 7)]
 # table 3 composite outcomes
-redcap_data[, obstetrical := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")]
-redcap_data[, gestational := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sga", "apgar5v7", "anomalies")]
+# redcap_data[, obstetrical := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")]
+# redcap_data[, gestational := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sga", "apgar5v7", "anomalies")]
 
-write.csv(redcap_data, file = paste0(data_path, "cleaned_data.csv"), row.names = FALSE)
+fwrite(
+  redcap_data, 
+  file = file.path(data_path, "cleaned_data.csv"), 
+  row.names = FALSE
+)
