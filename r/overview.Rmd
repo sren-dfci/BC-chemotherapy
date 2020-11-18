@@ -16,7 +16,7 @@ suppressMessages(lapply(packages_list, library, character.only=TRUE))
 source("functions.R")
 
 
-data_path <- "../data/2020-8-17/"
+data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23/"
 redcap_data <- fread(paste0(data_path, "cleaned_data.csv"))
 
 # factor vars need to be factor class
