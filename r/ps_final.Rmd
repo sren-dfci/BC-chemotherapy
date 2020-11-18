@@ -54,6 +54,38 @@ extractStdDiff <- function(.psw) {
   .df
 }
 
+# https://github.com/cran/PSW/blob/master/R/psw-internal.R
+diff.plot <- function(diff.before, diff.after, name, weight) {
+  # plot standardize difference for before and after weighting
+  #
+  # Args:
+  #   diff.before: standardized mean differece before weighting
+  #   diff.after: standardized mean difference after weighting
+  #   name: covariate name
+  #   weight: propensity score weighting method
+  # Returns
+  #   A plot is generated
+
+  par(las = 1, lwd = 2, mar = c(5, max(nchar(name)), 4, 2), bty = "n")
+
+  x.range <- range(c(diff.before, diff.after))
+  y.range <- c(1, length(name))
+  ord <- order(diff.before, decreasing = T)
+  plot(
+    x = x.range, y = y.range, xaxt = "n", yaxt = "n", type = "n",
+    xlim = x.range, ylim = y.range, 
+    ylab = "", xlab = "Standardized mean difference"
+  )
+  axis(side = 1, at = pretty(x.range))
+  axis(side = 2, at = length(name):1, labels = name[ord], tick = F)
+  abline(v = 0, lty = 1, col = "gray")
+  abline(v = -10, lty = 3, lwd = 1)
+  abline(v = 10, lty = 3, lwd = 1)
+  points(y = length(name):1, x = diff.before[ord], pch = 4)
+  points(y = length(name):1, x = diff.after[ord], pch = 21)
+  legend("topleft", legend = c("Unadjusted", weight), pch = c(4, 21))
+}
+
 ## MI estimates of treatment
 # pool MI results
 # https://stats.idre.ucla.edu/wp-content/uploads/2016/02/multipleimputation.pdf
@@ -103,7 +135,7 @@ For taxane: I(taxane = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + 
 
 For CSF: I(CSF = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + I(surgery = 1) \* I(stage = 3,4) + gestational age \* I(type = TNBC) + I(type = TNBC) \* I(surgery = 1) + I(type = TNBC) \* I(stage = 3,4) + I(type = TNBC) \* I(timing = neoadjuvant)
 
-```{r ps model, } 
+```{r ps model, fig.show = "hide" } 
 best_model_taxol <- psw(
   data = ps_data,
   form.ps = best_formula_taxol,
@@ -176,6 +208,38 @@ gcsf_coefs %>%
     latex_options = "scale_down",
     font_size = 12
   )
+```
+
+```{r std diff plots}
+diff.plot(
+  diff.before = best_model_taxol$std.diff.before[, "std.diff.pct"],
+  diff.after = best_model_taxol$std.diff.after[, "std.diff.pct"],
+  name = c(
+    "Age",
+    "Gestational age",
+    "Stage",
+    "TNBC",
+    "HER2",
+    "Neoadjuvant",
+    "Surgery"
+  ),
+  weight = "MW"
+)
+
+diff.plot(
+  diff.before = best_model_gcsf$std.diff.before[, "std.diff.pct"],
+  diff.after = best_model_gcsf$std.diff.after[, "std.diff.pct"],
+  name = c(
+    "Age",
+    "Gestational age",
+    "Stage",
+    "TNBC",
+    "HER2",
+    "Neoadjuvant",
+    "Surgery"
+  ),
+  weight = "MW"
+)
 ```
 
 # Average treatment effect model
@@ -367,7 +431,7 @@ ATE_composite_MI <- sapply(
   USE.NAMES = TRUE
 ) %>%
   rbindlist(., idcol = "Outcome") %>%
-  mutate(Outcome = paste0(Outcome, "_mi")) %>% 
+  mutate(Outcome = paste0(Outcome, "_mi")) %>%
   arrange(Outcome, Treatment)
 
 ATE_overall <- rbind(
