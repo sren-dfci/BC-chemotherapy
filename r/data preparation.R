@@ -25,6 +25,7 @@ redcap_data[brca %in% c("", "not tested"), mutation := "Unknown"]
 # chemo timing (could be out of pregnancy)
 redcap_data[anychemo == 1 & neoadjchemo == 1, chemo_timing := "neoadjuvant"]
 redcap_data[anychemo == 1 & neoadjchemo == 0, chemo_timing := "adjuvant"]
+redcap_data[anychemo == 0, chemo_timing := "missing"]
 # GCSF
 redcap_data[gfpreg == 0, gcsf := "no"]
 redcap_data[gfpreg == 1 & gftype == "daily GCSF", gcsf := "daily_gcsf"]
@@ -63,15 +64,67 @@ redcap_data[
 redcap_data[ptd == 0, preterm_birth_reason := "Not applicable"]
 
 # Table 3 changes
-# redcap_data$apgar5[redcap_data$apgar5 == "6; 7"] <- "6" # ?
-# redcap_data$apgar5 <- as.numeric(redcap_data$apgar5)
-# redcap_data[, apgar5v7 := as.numeric(apgar5 < 7)]
-# table 3 composite outcomes
-# redcap_data[, obstetrical := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")]
-# redcap_data[, gestational := as.numeric(rowSums(.SD, na.rm = TRUE) > 0), .SDcols = c("sga", "apgar5v7", "anomalies")]
+redcap_data$apgar5[redcap_data$apgar5 == "6; 7"] <- "6" # record_id 101
+redcap_data$apgar5 <- as.numeric(redcap_data$apgar5)
+redcap_data[, apgar5v7 := as.numeric(apgar5 < 7)]
+
+
+# Composite outcomes
+# four options
+# primary analysis: composite outcome is missing only if
+# all individual outcomes are missing
+redcap_data$obstetrical <- apply(
+  redcap_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
+  1,
+  function(x) {
+    ifelse(all(is.na(x)), # if all invidual outcomes are NA
+      NA, # define as NA
+      as.numeric(sum(x, na.rm = TRUE) > 0)
+    ) # else will be either 0 or 1
+  }
+)
+# sensitivity analysis: composite outcome is missing if any
+# individual outcome is missing
+redcap_data$obstetrical_sens <- apply(
+  redcap_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
+  1,
+  function(x) {
+    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1
+      1, # define as 1
+      ifelse(sum(is.na(x)) > 0, # else if any is NA
+        NA, # define as NA
+        0
+      )
+    )
+  }
+)
+redcap_data$gestational <- apply(
+  redcap_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
+  1,
+  function(x) {
+    ifelse(all(is.na(x)),
+      NA,
+      as.numeric(sum(x, na.rm = TRUE) > 0)
+    )
+  }
+)
+redcap_data$gestational_sens <- apply(
+  redcap_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
+  1,
+  function(x) {
+    ifelse(sum(x, na.rm = TRUE) > 0,
+      1,
+      ifelse(sum(is.na(x)) > 0,
+        NA,
+        0
+      )
+    )
+  }
+)
 
 fwrite(
-  redcap_data, 
-  file = file.path(data_path, "cleaned_data.csv"), 
+  redcap_data,
+  file = file.path(data_path, "cleaned_data.csv"),
   row.names = FALSE
 )
+
