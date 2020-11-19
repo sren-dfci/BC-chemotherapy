@@ -4,34 +4,77 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(include = TRUE, warning = FALSE, message = FALSE, echo = FALSE)
+knitr::opts_chunk$set(
+  include = TRUE, warning = FALSE, message = FALSE, echo = FALSE
+)
 ```
 
 ```{r import data, include = FALSE}
-packages_list <- c('data.table', 'tidyverse', 'kableExtra', 'MASS')
-new_packages <- packages_list[!(packages_list %in% installed.packages()[, 'Package'])]
-if(length(new_packages)) install.packages(new_packages)
-suppressMessages(lapply(packages_list, library, character.only=TRUE))
+packages_list <- c(
+  "data.table", "tidyverse", "kableExtra", "MASS"
+)
+new_packages <- packages_list[
+  !(packages_list %in% installed.packages()[, "Package"])
+]
+if (length(new_packages)) install.packages(new_packages)
+suppressMessages(lapply(packages_list, library, character.only = TRUE))
 # load packages and functions needed
-source("functions.R")
+source(file.path(
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/r",
+  "functions.R"
+))
 
-
-data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23/"
-redcap_data <- fread(paste0(data_path, "cleaned_data.csv"))
+data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23"
+redcap_data <- fread(file.path(data_path, "cleaned_data.csv"))
 
 # factor vars need to be factor class
 # table 1 factor vars
-tbl_1_factor_vars <- c("dxtri", "stage", "cancer_type", "mutation", "chemo_timing", "chemotherapy", "gcsf", "surgpg")
-redcap_data[, (tbl_1_factor_vars) := lapply(.SD, as.factor), .SDcols = tbl_1_factor_vars]
+tbl_1_factor_vars <- c(
+  "dxtri", "stage", "cancer_type", "mutation", "chemo_timing",
+  "chemotherapy", "gcsf", "surgpg"
+)
+redcap_data[
+  ,
+  (tbl_1_factor_vars) := lapply(.SD, as.factor),
+  .SDcols = tbl_1_factor_vars
+]
 
 # table 2 factor vars
-redcap_data[, pregnancy_outcome := factor(pregnancy_outcome, levels = c("single", "double", "Termination", "Spontaneous"))]
-redcap_data[, preterm_birth_outcome := factor(preterm_birth_outcome, levels = c(">=37", "<37"))]
-redcap_data[, preterm_birth_reason := factor(preterm_birth_reason, levels = c("Spontaneous & Medical", "Spontaneous", "Medical", "Iatrogenic", "Unknown", "Not applicable"))]
+redcap_data[
+  ,
+  pregnancy_outcome := factor(
+    pregnancy_outcome,
+    levels = c("single", "double", "Termination", "Spontaneous")
+  )
+]
+redcap_data[
+  ,
+  preterm_birth_outcome := factor(
+    preterm_birth_outcome,
+    levels = c(">=37", "<37")
+  )
+]
+redcap_data[
+  ,
+  preterm_birth_reason := factor(
+    preterm_birth_reason,
+    levels = c(
+      "Spontaneous & Medical", "Spontaneous", "Medical",
+      "Iatrogenic", "Unknown", "Not applicable"
+    )
+  )
+]
 
 # table 3 factor vars
-tbl_3_vars <- c("sptb", "pprom", "gdm", "pih", "chorio", "sga", "apgar5v7", "anomalies")
-redcap_data[, (tbl_3_vars) := lapply(.SD, as.factor), .SDcols = tbl_3_vars]
+tbl_3_vars <- c(
+  "sptb", "pprom", "gdm", "pih", "chorio",
+  "sga", "apgar5v7", "anomalies"
+)
+redcap_data[
+  ,
+  (tbl_3_vars) := lapply(.SD, as.factor),
+  .SDcols = tbl_3_vars
+]
 ```
 
 
@@ -41,26 +84,32 @@ chemo_data <- redcap_data[chemopg == 1, ]
 taxane_data <- chemo_data[taxolpreg == 1, ]
 no_taxane_data <- chemo_data[taxolpreg == 0, ]
 
-tbl_1 <- lapply(list(no_chemo_data, chemo_data, no_taxane_data, taxane_data), function(x) {
-  .tbl <- list(
-  n = data.frame(Variable = "N", value = nrow(x)),
-  age = numStats(x[, .(agedx)]),
-  gestational_age = numStats(x[, .(gadx)]),
-  trimester = factorStats(x[, .(dxtri)]),
-  cancer_stage = factorStats(x[, .(stage)]),
-  cancer_type = factorStats(x[, .(cancer_type)]),
-  mutation = factorStats(x[, .(mutation)]),
-  gestational_age_tx = numStats(x[, .(chemoga)]),
-  chemo_timing = factorStats(x[, .(chemo_timing)]),
-  chemotherapy = factorStats(x[, .(chemotherapy)]),
-  GCSF = factorStats(x[, .(gcsf)]),
-  surgery = factorStats(x[, .(surgpg)])
+tbl_1 <- lapply(
+  list(no_chemo_data, chemo_data, no_taxane_data, taxane_data),
+  function(x) {
+    .tbl <- list(
+      n = data.frame(Variable = "N", value = nrow(x)),
+      age = numStats(x[, .(agedx)]),
+      gestational_age = numStats(x[, .(gadx)]),
+      trimester = factorStats(x[, .(dxtri)]),
+      cancer_stage = factorStats(x[, .(stage)]),
+      cancer_type = factorStats(x[, .(cancer_type)]),
+      mutation = factorStats(x[, .(mutation)]),
+      gestational_age_tx = numStats(x[, .(chemoga)]),
+      chemo_timing = factorStats(x[, .(chemo_timing)]),
+      chemotherapy = factorStats(x[, .(chemotherapy)]),
+      GCSF = factorStats(x[, .(gcsf)]),
+      surgery = factorStats(x[, .(surgpg)])
+    )
+    return(.tbl)
+  }
 )
-  return (.tbl)
-})
 
 tbl_1 <- reduce(lapply(tbl_1, rbindlist), cbind)[, c(1, 2, 4, 6, 8)]
-names(tbl_1)[2:5] <- c("w/o chemotherapy", "w/ chemotherapy", "w/o taxane", "w/ taxane")
+names(tbl_1)[2:5] <- c(
+  "w/o chemotherapy", "w/ chemotherapy", "w/o taxane", "w/ taxane"
+)
+kable(tbl_1, caption = "Table 1")
 ```
 
 ```{r table 2}
@@ -74,10 +123,12 @@ tbl_2 <- lapply(c(0, 1), function(x) {
     preterm_reason = factorStats(.data[, .(preterm_birth_reason)])
   )
   .tbl <- rbindlist(.tbl)
-  return (.tbl)
+  return(.tbl)
 })
 tbl_2 <- reduce(tbl_2, cbind)[, c(1, 2, 4)]
 names(tbl_2)[2:3] <- c("w/o chemotherapy", "w/ chemotherapy")
+
+kabel(tbl_2, caption = "Table 2")
 
 # table_2 <- redcap_data %>% group_by(chemopg) %>% summarise(
 #   pt_spontaneous = countPercentage(sptb == 1), # preterm birth spontaneous
@@ -89,58 +140,73 @@ names(tbl_2)[2:3] <- c("w/o chemotherapy", "w/ chemotherapy")
 
 ```{r table 3}
 tbl_3 <- lapply(0:1, function(x) {
-  .data <- redcap_data[chemopg == 1 & pregnancy_outcome != "double" & taxolpreg == x, ] # all twin+ pregnancies should be excluded from table 3, 4
+  .data <- redcap_data[
+    chemopg == 1 &
+      pregnancy_outcome == "single" &
+      taxolpreg == x,
+  ] # all twin+ pregnancies should be excluded from table 3, 4
   .tbl <- list(
     n = data.frame(Variable = "N", Value = nrow(.data)),
     o_outcome = data.frame(Variable = "Obstetrical Outcome", Value = ""),
-    composite_obstetrical = factorStats(.data[, .(obstetrical)]),
+    composite_obstetrical = factorStats(.data[, .(obstetrical_sens)]),
     sptb = factorStats(.data[, .(sptb)]),
     PPROM = factorStats(.data[, .(pprom)]),
     gdm = factorStats(.data[, .(gdm)]),
     pih = factorStats(.data[, .(pih)]),
     chorio = factorStats(.data[, .(chorio)]),
     g_outcome = data.frame(Variable = "Gestational Outcome", Value = ""),
-    composite_gestational = factorStats(.data[, .(gestational)]),
+    composite_gestational = factorStats(.data[, .(gestational_sens)]),
     SGA = factorStats(.data[, .(sga)]),
     apgar5 = factorStats(.data[, .(apgar5v7)]),
     anomalies = factorStats(.data[, .(anomalies)])
   )
   .tbl <- rbindlist(.tbl)
-  return (.tbl)
+  return(.tbl)
 })
 tbl_3 <- reduce(tbl_3, cbind)[, c(1, 2, 4)]
 names(tbl_3)[2:3] <- c("w/o taxane", "w/ taxane")
+View(tbl_3)
 ```
 
 
 ```{r table 4}
 tbl_4 <- lapply(c(1, 0), function(x) {
-  .data <- redcap_data[chemopg == 1 & pregnancy_outcome != "double" & gfpreg == x, ] # all twin+ pregnancies should be excluded from table 3, 4
+  .data <- redcap_data[
+    chemopg == 1 &
+      pregnancy_outcome == "single" &
+      gfpreg == x,
+  ] # all twin+ pregnancies should be excluded from table 3, 4
   .tbl <- list(
     n = data.frame(Variable = "N", Value = nrow(.data)),
     o_outcome = data.frame(Variable = "Obstetrical Outcome", Value = ""),
-    composite_obstetrical = factorStats(.data[, .(obstetrical)]),
+    composite_obstetrical = factorStats(.data[, .(obstetrical_sens)]),
     sptb = factorStats(.data[, .(sptb)]),
     PPROM = factorStats(.data[, .(pprom)]),
     gdm = factorStats(.data[, .(gdm)]),
     pih = factorStats(.data[, .(pih)]),
     chorio = factorStats(.data[, .(chorio)]),
     g_outcome = data.frame(Variable = "Gestational Outcome", Value = ""),
-    composite_gestational = factorStats(.data[, .(gestational)]),
+    composite_gestational = factorStats(.data[, .(gestational_sens)]),
     SGA = factorStats(.data[, .(sga)]),
     apgar5 = factorStats(.data[, .(apgar5v7)]),
     anomalies = factorStats(.data[, .(anomalies)])
   )
   .tbl <- rbindlist(.tbl)
-  return (.tbl)
+  return(.tbl)
 })
 tbl_4 <- reduce(tbl_4, cbind)[, c(1, 2, 4)]
 names(tbl_4)[2:3] <- c("w gcsf", "w/o gcsf")
-tbl_4 %>% 
-  knitr::kable(align = "l", digits = 2, booktabs = TRUE,
-               caption = "Table 4",
-               col.names = c("Variable", "GCSF containing", "Non-GCSF containing")) %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "center")
+tbl_4 %>%
+  knitr::kable(
+    align = "l", digits = 2, booktabs = TRUE,
+    caption = "Table 4",
+    col.names = c("Variable", "GCSF containing", "Non-GCSF containing")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = F,
+    position = "center"
+  )
 ```
 
 
