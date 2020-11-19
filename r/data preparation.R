@@ -24,7 +24,11 @@ redcap_data[brca %in% c("0", "no", "No"), mutation := "N"]
 redcap_data[brca %in% c("", "not tested"), mutation := "Unknown"]
 # chemo timing (could be out of pregnancy)
 redcap_data[anychemo == 1 & neoadjchemo == 1, chemo_timing := "neoadjuvant"]
-redcap_data[anychemo == 1 & neoadjchemo != 1, chemo_timing := "adjuvant"]
+redcap_data[
+  anychemo == 1 &
+    (neoadjchemo == 0 | is.na(neoadjchemo)),
+  chemo_timing := "adjuvant"
+]
 redcap_data[anychemo == 0, chemo_timing := "missing"]
 # GCSF
 redcap_data[gfpreg == 0, gcsf := "no"]
@@ -50,15 +54,12 @@ redcap_data[is.na(twin) & is.na(outcomepg), pregnancy_outcome := NA]
 # preterm birth
 redcap_data[ptd == 0, preterm_birth_outcome := ">=37"]
 redcap_data[ptd == 1, preterm_birth_outcome := "<37"]
-redcap_data[sptb == 1, preterm_birth_reason := "Spontaneous"]
-redcap_data[indptb == 1, preterm_birth_reason := "Medical"]
+# for those <37
+redcap_data[ptd == 1 & sptb == 1, preterm_birth_reason := "Spontaneous"]
+redcap_data[ptd == 1 & indptb == 1, preterm_birth_reason := "Medical"]
+redcap_data[ptd == 1 & iatptb == 1, preterm_birth_reason := "Iatrogenic"]
 redcap_data[
-  sptb == 1 & indptb == 1,
-  preterm_birth_reason := "Spontaneous & Medical"
-]
-redcap_data[iatptb == 1, preterm_birth_reason := "Iatrogenic"]
-redcap_data[
-  sptb == 0 & indptb == 0 & iatptb == 0,
+  ptd == 1 & is.na(preterm_birth_reason),
   preterm_birth_reason := "Unknown"
 ]
 redcap_data[ptd == 0, preterm_birth_reason := "Not applicable"]
@@ -127,4 +128,3 @@ fwrite(
   file = file.path(data_path, "cleaned_data.csv"),
   row.names = FALSE
 )
-
