@@ -55,7 +55,7 @@ extractStdDiff <- function(.psw) {
 }
 
 # https://github.com/cran/PSW/blob/master/R/psw-internal.R
-diff.plot <- function(diff.before, diff.after, name, weight) {
+diff.plot <- function(diff.before, diff.after, name, weight, title = NULL) {
   # plot standardize difference for before and after weighting
   #
   # Args:
@@ -73,8 +73,9 @@ diff.plot <- function(diff.before, diff.after, name, weight) {
   ord <- order(diff.before, decreasing = T)
   plot(
     x = x.range, y = y.range, xaxt = "n", yaxt = "n", type = "n",
-    xlim = x.range, ylim = y.range, 
-    ylab = "", xlab = "Standardized mean difference"
+    xlim = x.range, ylim = y.range,
+    ylab = "", xlab = "Standardized mean difference",
+    main = title
   )
   axis(side = 1, at = pretty(x.range))
   axis(side = 2, at = length(name):1, labels = name[ord], tick = F)
@@ -106,9 +107,16 @@ PoolEstimates <- function(Q, U) {
 }
 
 # load data
-ps_data <- fread(
-  file.path("C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data", "ps_data.csv")
+redcap_data <- fread(
+  file.path(
+    "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23",
+    "cleaned_data.csv"
+  )
 )
+ps_data <- redcap_data[
+  chemopg == 1 & pregnancy_outcome == "single" &
+    !is.na(gadx),
+]
 
 best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
 I_surgery + I_neoadjuvant + neo_stage + gadx_surg + gadx_stage"
@@ -121,6 +129,39 @@ tbl1_vars <- c(
   "age_norm", "gadx_norm", "I_stage_34",
   "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery"
 )
+```
+
+```{r modify table 1 vars for ps model}
+# collapse factor levels, normalized numeric vars, and splined them
+# normalized age
+ps_data[, age_norm := (agedx - mean(agedx)) / sd(agedx)]
+# normalized gestational age
+ps_data[, gadx_norm := (gadx - mean(gadx)) / sd(gadx)]
+# cancer stage
+ps_data[, I_stage_34 := ifelse(stage %in% 3:4, 1, 0)] # collapse 1-2, and 3-4
+# cancer type
+ps_data[, I_TNBC := ifelse(cancer_type == "TNBC", 1, 0)]
+ps_data[, I_HER2 := ifelse(cancer_type == "HER2", 1, 0)]
+# BRCA1/2 
+ps_data[, I_mutation := ifelse(mutation == "Y", 1, 0)] # collapse 0 and unknown
+# chemotherapy timing
+ps_data[, I_neoadjuvant := ifelse(chemo_timing == "neoadjuvant", 1, 0)]
+# surgery
+ps_data[, I_surgery := surgpg]
+
+# psw does not support interaction terms when calculating ATE
+# based on forms_taxol[227]: taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + 
+# I_stage_34 + I_surgery + I_neoadjuvant + I_neoadjuvant : I_stage_34 +
+# gadx_norm : I_surgery + gadx_norm : I_stage_34 + I_TNBC : I_surgery
+ps_data[, neo_stage := I_neoadjuvant * I_stage_34]
+ps_data[, gadx_surg := gadx_norm * I_surgery]
+ps_data[, gadx_stage := gadx_norm * I_stage_34]
+ps_data[, tnbc_surg := I_TNBC * I_surgery]
+ps_data[, surg_stage := I_surgery * I_stage_34]
+ps_data[, gadx_tnbc := gadx_norm * I_TNBC]
+ps_data[, tnbc_stage := I_TNBC * I_stage_34]
+ps_data[, tnbc_neo := I_TNBC * I_neoadjuvant]
+ps_data[, surg_neo := I_surgery * I_neoadjuvant]
 ```
 
 In randomized experiments, subjects are randomly assigned to each treatment group so that each covariate is balanced across groups. However, in observational studies, the assignment of treatments is not random. Some of the covariates could affect the decision of treatment, which causes the observed difference in the treatment outcome can not be fully attributed to the treatment effect. Propensity score matching is a method that attempts to estimate the probability of receiving treatment for each subject. Based on the estimated treatment probability, subjects are assigned different weights to reduce this bias. The difference in the treatment outcome is then comparable.
@@ -144,6 +185,8 @@ best_model_taxol <- psw(
   V.name = tbl1_vars
 )
 
+ps_data[, w_taxol_mw := best_model_taxol$W]
+
 best_model_gcsf <- psw(
   data = ps_data,
   form.ps = best_formula_gcsf,
@@ -151,6 +194,8 @@ best_model_gcsf <- psw(
   std.diff = TRUE,
   V.name = tbl1_vars
 )
+
+ps_data[, w_gcsf_mw := best_model_gcsf$W]
 
 # output of glm model
 taxol_coefs <- as.data.frame(summary(best_model_taxol$ps.model)$coefficients)
@@ -223,7 +268,8 @@ diff.plot(
     "Neoadjuvant",
     "Surgery"
   ),
-  weight = "MW"
+  weight = "MW",
+  title = "Adjusted for taxane"
 )
 
 diff.plot(
@@ -238,7 +284,8 @@ diff.plot(
     "Neoadjuvant",
     "Surgery"
   ),
-  weight = "MW"
+  weight = "MW",
+  title = "Adjusted for CSF"
 )
 ```
 
@@ -253,57 +300,6 @@ composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(
 4. Generate composite outcomes the same way as method 2, then use MI method to impute missingness
 
 ```{r create composite outcomes, include = FALSE}
-# primary analysis: composite outcome is missing only if
-# all individual outcomes are missing
-ps_data$obstetrical <- apply(
-  ps_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
-  1,
-  function(x) {
-    ifelse(all(is.na(x)), # if all invidual outcomes are NA
-      NA, # define as NA
-      as.numeric(sum(x, na.rm = TRUE) > 0)
-    ) # else will be either 0 or 1
-  }
-)
-# sensitivity analysis: composite outcome is missing if any
-# individual outcome is missing
-ps_data$obstetrical_sens <- apply(
-  ps_data[, .SD, .SDcols = c("sptb", "pprom", "gdm", "pih", "chorio")],
-  1,
-  function(x) {
-    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1
-      1, # define as 1
-      ifelse(sum(is.na(x)) > 0, # else if any is NA
-        NA, # define as NA
-        0
-      )
-    )
-  }
-)
-ps_data$gestational <- apply(
-  ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
-  1,
-  function(x) {
-    ifelse(all(is.na(x)),
-      NA,
-      as.numeric(sum(x, na.rm = TRUE) > 0)
-    )
-  }
-)
-ps_data$gestational_sens <- apply(
-  ps_data[, .SD, .SDcols = c("sga", "apgar5v7", "anomalies")],
-  1,
-  function(x) {
-    ifelse(sum(x, na.rm = TRUE) > 0,
-      1,
-      ifelse(sum(is.na(x)) > 0,
-        NA,
-        0
-      )
-    )
-  }
-)
-
 ## MI
 mice_fit_ls <- sapply(
   c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
