@@ -24,7 +24,7 @@ redcap_data[brca %in% c("0", "no", "No"), mutation := "N"]
 redcap_data[brca %in% c("", "not tested"), mutation := "Unknown"]
 # chemo timing (could be out of pregnancy)
 redcap_data[anychemo == 1 & neoadjchemo == 1, chemo_timing := "neoadjuvant"]
-redcap_data[anychemo == 1 & neoadjchemo == 0, chemo_timing := "adjuvant"]
+redcap_data[anychemo == 1 & neoadjchemo != 1, chemo_timing := "adjuvant"]
 redcap_data[anychemo == 0, chemo_timing := "missing"]
 # GCSF
 redcap_data[gfpreg == 0, gcsf := "no"]
