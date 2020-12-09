@@ -1,9 +1,9 @@
 library(data.table)
 library(tidyverse)
 
-data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23"
+data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-12-2"
 redcap_data <- fread(file.path(
-  data_path, "RegistryOfPregnancyA_DATA_2020-10-23_1015.csv"
+  data_path, "RegistryOfPregnancyA_DATA_2020-12-02_1656.csv"
 ))
 names(redcap_data)[1] <- "record_id"
 # exclude record ID 26, 56, 128
@@ -13,7 +13,18 @@ redcap_data[chemoga %in% c("n/a", "unknown"), chemoga := NA]
 redcap_data[chemoga == "18 weeks", chemoga := "18"]
 redcap_data[, chemoga := as.numeric(chemoga)]
 
+
 # table 1 changes
+# Impute gestational age at diagnosis by gestational age at surgery and 
+# weeks between diagnosis and surgery
+redcap_data <- redcap_data %>%
+  mutate(gadx = if_else(
+    is.na(gadx),
+    as.numeric(surgga) - as.numeric(time2surg),
+    gadx
+  )) %>%
+  mutate(gadx = if_else(gadx < 0, 0, gadx))
+# Categorize year of diagnosis
 redcap_data <- redcap_data %>% 
   mutate(year_grp = case_when(
     yeardx <= 2000 ~ "before 2000",
@@ -30,6 +41,9 @@ redcap_data <- redcap_data %>%
     ),
     ordered = TRUE
   ))
+# Stage 0 is missing
+redcap_data <- redcap_data %>% 
+  mutate(stage = ifelse(stage == 0, NA, stage))
 # cancer type
 redcap_data[her2 == 1, cancer_type := "HER2"]
 redcap_data[her2 == 0 & erpr == 1, cancer_type := "HR"]

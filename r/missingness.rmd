@@ -34,6 +34,12 @@ redcap_data[
     is.na(gadx),
     .(chemopg, record_id)
 ][order(chemopg), ]
+
+redcap_data[
+    record_id %in% c(55, 85, 90),
+    .(record_id, gadx, surgga, time2surg)
+]
+
 ```
 
 Breast cancer stage missing:
