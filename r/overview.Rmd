@@ -91,6 +91,7 @@ tbl_1 <- lapply(
       n = data.frame(Variable = "N", value = nrow(x)),
       age = numStats(x[, .(agedx)]),
       gestational_age = numStats(x[, .(gadx)]),
+      year_dx = factorStats(x[, .(year_grp)]),
       trimester = factorStats(x[, .(dxtri)]),
       cancer_stage = factorStats(x[, .(stage)]),
       cancer_type = factorStats(x[, .(cancer_type)]),

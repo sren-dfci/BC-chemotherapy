@@ -14,6 +14,22 @@ redcap_data[chemoga == "18 weeks", chemoga := "18"]
 redcap_data[, chemoga := as.numeric(chemoga)]
 
 # table 1 changes
+redcap_data <- redcap_data %>% 
+  mutate(year_grp = case_when(
+    yeardx <= 2000 ~ "before 2000",
+    2000 < yeardx & yeardx <= 2005 ~ "2000-2005",
+    2005 < yeardx & yeardx <= 2010 ~ "2005-2010",
+    2010 < yeardx & yeardx <= 2015 ~ "2010-2015",
+    2015 < yeardx ~ "2015-2020"
+  )) %>% 
+  mutate(year_grp = factor(
+    year_grp,
+    levels = c(
+      "before 2000", "2000-2005", "2005-2010",
+      "2010-2015", "2015-2020"
+    ),
+    ordered = TRUE
+  ))
 # cancer type
 redcap_data[her2 == 1, cancer_type := "HER2"]
 redcap_data[her2 == 0 & erpr == 1, cancer_type := "HR"]

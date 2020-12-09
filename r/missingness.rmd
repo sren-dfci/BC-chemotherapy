@@ -1,0 +1,75 @@
+---
+title: "Missingness"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  include = TRUE, warning = FALSE, message = FALSE, echo = FALSE
+)
+```
+
+```{r import data, include = FALSE}
+packages_list <- c(
+  "data.table", "tidyverse", "kableExtra", "MASS"
+)
+new_packages <- packages_list[
+  !(packages_list %in% installed.packages()[, "Package"])
+]
+if (length(new_packages)) install.packages(new_packages)
+suppressMessages(lapply(packages_list, library, character.only = TRUE))
+# load packages and functions needed
+source(file.path(
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/r",
+  "functions.R"
+))
+
+data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23"
+redcap_data <- fread(file.path(data_path, "cleaned_data.csv"))
+```
+
+Gestational age at diagnosis missing:
+```{r gestational age at diagnosis missing}
+redcap_data[
+    is.na(gadx),
+    .(chemopg, record_id)
+][order(chemopg), ]
+```
+
+Breast cancer stage missing:
+```{r breast cancer stage missing}
+redcap_data[
+    is.na(stage) | stage == 0,
+    .(stage, record_id)
+][order(stage), ]
+```
+
+Timing of chemotherapy missing:
+```{r timing of chemotherapy missing}
+redcap_data[
+    anychemo == 1 & is.na(neoadjchemo),
+    .(anychemo, neoadjchemo, record_id)
+]
+```
+
+Gestational age at delivery missing:
+```{r gestational age at delivery missing}
+redcap_data[
+    is.na(delga),
+    .(chemopg, record_id)
+][order(chemopg), ]
+```
+
+Preterm birth unknown:
+```{r preterm birth unknown}
+redcap_data[
+    preterm_birth_reason == "" & ptd == 1,
+    .(
+        record_id,
+        sptb,
+        indptb,
+        iatptb,
+        ptd
+    )
+]
+```
