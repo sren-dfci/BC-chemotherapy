@@ -18,14 +18,21 @@ new_packages <- packages_list[
 ]
 if (length(new_packages)) install.packages(new_packages)
 suppressMessages(lapply(packages_list, library, character.only = TRUE))
-# load packages and functions needed
-source(file.path(
-  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/r",
-  "functions.R"
-))
 
-data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-10-23"
-redcap_data <- fread(file.path(data_path, "cleaned_data.csv"))
+select <- dplyr::select
+rbind <- base::rbind
+kable <- knitr::kable
+
+project_folder <- file.path(
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared",
+  "Chemo during pregnancy (Sella)"
+)
+
+# load functions needed
+source(file.path(project_folder, "r", "functions.R"))
+
+data_path <- file.path(project_folder, "data", "2020-12-9")
+load(file.path(data_path, "cleaned_data.RData"))
 
 # factor vars need to be factor class
 # table 1 factor vars
