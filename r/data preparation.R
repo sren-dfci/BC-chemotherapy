@@ -1,9 +1,13 @@
 library(data.table)
 library(tidyverse)
 
-data_path <- "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data/2020-12-2"
+project_folder <- file.path(
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared",
+  "Chemo during pregnancy (Sella)"
+)
+data_path <- file.path(project_folder, "data", "2020-12-9")
 redcap_data <- fread(file.path(
-  data_path, "RegistryOfPregnancyA_DATA_2020-12-02_1656.csv"
+  data_path, "RegistryOfPregnancyA_DATA_2020-12-09_1650.csv"
 ))
 names(redcap_data)[1] <- "record_id"
 # exclude record ID 26, 56, 128
@@ -18,12 +22,12 @@ redcap_data[, chemoga := as.numeric(chemoga)]
 # Impute gestational age at diagnosis by gestational age at surgery and 
 # weeks between diagnosis and surgery
 redcap_data <- redcap_data %>%
-  mutate(gadx = if_else(
+  mutate(gadx = ifelse(
     is.na(gadx),
     as.numeric(surgga) - as.numeric(time2surg),
     gadx
   )) %>%
-  mutate(gadx = if_else(gadx < 0, 0, gadx))
+  mutate(gadx = ifelse(gadx < 0, 0, gadx))
 # Categorize year of diagnosis
 redcap_data <- redcap_data %>% 
   mutate(year_grp = case_when(
@@ -153,8 +157,4 @@ redcap_data$gestational_sens <- apply(
   }
 )
 
-fwrite(
-  redcap_data,
-  file = file.path(data_path, "cleaned_data.csv"),
-  row.names = FALSE
-)
+save(redcap_data, file = file.path(data_path, "cleaned_data.RData"))
