@@ -40,15 +40,13 @@ ps_data <- redcap_data[
   chemopg == 1 & pregnancy_outcome == "single", 
 ]
 
-best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
-I_surgery + I_neoadjuvant + neo_stage + gadx_surg + gadx_stage"
+best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + yeardx_centered + neo_stage + surg_stage + gadx_surg + gadx_neo + tnbc_stage + tnbc_neo"
 
 best_formula_gcsf <- "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
-I_surgery + I_neoadjuvant + surg_stage + gadx_tnbc + tnbc_surg +
-tnbc_stage + tnbc_neo"
+I_surgery + I_neoadjuvant + yeardx_centered + neo_stage + surg_neo + gadx_stage"
 
 tbl1_vars <- c(
-  "age_norm", "gadx_norm", "I_stage_34",
+  "age_norm", "gadx_norm", "yeardx_centered", "I_stage_34",
   "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery"
 )
 ```
@@ -94,17 +92,17 @@ In randomized experiments, subjects are randomly assigned to each treatment grou
 
 # Propensity score matching model
 
-In our study, there are two treatment effects that we want to evaluate: taxanes and colony stimulating factors (CSF). For each treatment, we built a logistic regression, with the treatment as the dependent variable and patient characteristics as confounders. By fitting this model, we obtained the probability of receiving taxane/CSF for each subject, and rebalanced the confounders accordingly. The confounders are selected from Table 1, which include: age at diagnosis, gestational age at diagnosis, cancer stage, cancer type, timing of chemotherapy and whether they had breast surgery during pregnancy. The performance of rebalancing were evaluated by the standardized difference of each confounder. Standardized difference is a measure of the effect size of covariates between two groups. Generally speaking, it calculates the difference in means divided by standard error. There is no specific threshold, but an absolute effect size between 0\% and 20\% is usually considered small. 
+In our study, there are two treatment effects that we want to evaluate: taxanes and colony stimulating factors (CSF). For each treatment, we built a logistic regression, with the treatment as the dependent variable and patient characteristics as confounders. By fitting this model, we obtained the probability of receiving taxane/CSF for each subject, and rebalanced the confounders accordingly. The confounders are selected from Table 1, which include: age at diagnosis, gestational age at diagnosis, year of diagnosis, cancer stage, cancer type, timing of chemotherapy and whether they had breast surgery during pregnancy. The performance of rebalancing were evaluated by the standardized difference of each confounder. Standardized difference is a measure of the effect size of covariates between two groups. Generally speaking, it calculates the difference in means divided by standard error. There is no specific threshold, but an absolute effect size between 0\% and 10\% is usually considered small. 
 
 We also added several interaction terms to the logistic models. To decide which interaction terms should be added, we listed all the possible two-way interaction combinations, fitted corresponding models and compared model performance by the largest standardized difference in each model. There are also several choices of weighting shcemes. We compared two weights in this study: average treatment effect weight (ATE) and matching weight (MW). For both treatments, MW provides smaller overall standardized differences, so we use MW in all the following results. The formulas we used to get the best performances are:
 
-For taxane: I(taxane = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + I(timing = neoadjuvant) \* I(stage = 3,4) + gestational age \* I(surgery = 1) + gestational age \* I(stage = 3, 4)
+For taxane: I(taxane = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + year of diganosis + I(timing = neoadjuvant) \* I(stage = 3,4) + I(surgery = 1) \* I(stage = 3,4) + gestational age \* I(surgery = 1) + gestational age \* I(timing = neoadjuvant) + I(type = TNBC) \* I(stage = 3,4) + I(type = TNBC) \* I(timing = neoadjuvant)
 
-For CSF: I(CSF = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + I(surgery = 1) \* I(stage = 3,4) + gestational age \* I(type = TNBC) + I(type = TNBC) \* I(surgery = 1) + I(type = TNBC) \* I(stage = 3,4) + I(type = TNBC) \* I(timing = neoadjuvant)
+For CSF: I(CSF = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + year of diagnosis + I(timing = neoadjuvant) \* I(stage = 3,4) + I(surgery = 1) \* I(timing = neoadjuvant) + gestational age \* I(stage = 3,4)
 
 ```{r ps model, fig.show = "hide" } 
 best_model_taxol <- psw(
-  data = ps_data,
+  data = as.data.frame(ps_data),
   form.ps = best_formula_taxol,
   weight = "MW",
   std.diff = TRUE,
@@ -114,7 +112,7 @@ best_model_taxol <- psw(
 ps_data[, w_taxol_mw := best_model_taxol$W]
 
 best_model_gcsf <- psw(
-  data = ps_data,
+  data = as.data.frame(ps_data),
   form.ps = best_formula_gcsf,
   weight = "MW",
   std.diff = TRUE,
@@ -127,8 +125,8 @@ ps_data[, w_gcsf_mw := best_model_gcsf$W]
 taxol_coefs <- as.data.frame(summary(best_model_taxol$ps.model)$coefficients)
 taxol_coefs$covariate <- c(
   "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
-  "Neoadjuvant", "Neoadjuvant*Stage", "Gestational age*Surgery",
-  "Gestational age*Stage"
+  "Neoadjuvant", "Year of diagnosis", "Neoadjuvant*Stage", "Surgery*Stage", 
+  "Gestational age*Surgery", "Gestational age*Neoadjuvant", "TNBC*Stage", "TNBC*Neoadjuvant"
 )
 taxol_coefs %>%
   mutate(
@@ -155,8 +153,8 @@ taxol_coefs %>%
 gcsf_coefs <- as.data.frame(summary(best_model_gcsf$ps.model)$coefficients)
 gcsf_coefs$covariate <- c(
   "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
-  "Neoadjuvant", "Surgery*Stage", "Gestational*TNBC", "TNBC*Surgery",
-  "TNBC*Stage", "TNBC*Neoadjuvant"
+  "Neoadjuvant", "Year of diagnosis", "Neoadjuvant*Stage", "Surgery*Neoadjuvant",
+  "Gestational age*Stage"
 )
 gcsf_coefs %>%
   mutate(
@@ -188,6 +186,7 @@ diff.plot(
   name = c(
     "Age",
     "Gestational age",
+    "Year of diagnosis",
     "Stage",
     "TNBC",
     "HER2",
@@ -204,6 +203,7 @@ diff.plot(
   name = c(
     "Age",
     "Gestational age",
+    "Year of diagnosis",
     "Stage",
     "TNBC",
     "HER2",
@@ -222,7 +222,7 @@ The treatment effect of taxane\/CSF to obstetrical\/gestational outcomes could b
 1. If any individual outcome is positive, the composite outcome is positive; if any individual outcome is negative and no outcome is positive, the composite outcome is negative; else it's missing
 2. If any individual outcome is positive, the composite outcome is positive; if all individual outcomes are negative, the composite outcome is negative; else it's missing
 3. Generate composite outcomes the same way as method 1, then use multiple imputation (MI) method to impute missingness. For each composite outcome, 10 copies of the original dataset is created, then a regression model is fitted to predict missing values from complete cases. This process is iterated 25 times, updating regression parameters after each iteration. The formula is: \
-composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(type = HER2) + I(timing = neoadjuvant) + I(surgery)
+composite outcome ~ age + gestational age + year of diagnosis + I(stage = 3,4) + I(type = TNBC) + I(type = HER2) + I(timing = neoadjuvant) + I(surgery)
 4. Generate composite outcomes the same way as method 2, then use MI method to impute missingness
 
 ```{r create composite outcomes, include = FALSE}
@@ -230,7 +230,7 @@ composite outcome ~ age + gestational age + I(stage = 3,4) + I(type = TNBC) + I(
 mice_fit_ls <- sapply(
   c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
   function(outc) {
-    vars <- c(tbl1_vars, outc)
+    vars <- c(tbl1_vars, outc) # c("age_norm", "gadx_norm", "I_stage_34", "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery", outc)
     .sub_data <- ps_data[, .SD, .SDcols = vars]
     # mice object
     .fit <- mice(

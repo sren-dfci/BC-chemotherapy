@@ -338,7 +338,6 @@ cat(
   "The largest standard difference is \n", M_gcsf[2], "\n"
 )
 
-
 ```
 
 When using ATE weight, the best PS matching model is: 
