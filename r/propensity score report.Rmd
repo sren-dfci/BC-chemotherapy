@@ -98,7 +98,7 @@ ps_data[, I_neoadjuvant := ifelse(chemo_timing == "neoadjuvant", 1, 0)]
 ps_data[, I_surgery := surgpg]
 #  "yeardx_centered",
 tbl1_vars <- c(
-  "age_norm", "gadx_norm", "yeardx_centered", "I_stage_34", 
+  "age_norm", "gadx_norm", "I_stage_34", 
   "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery"
 ) # used for std.diff check, not covariates
 
@@ -164,7 +164,6 @@ fixed_terms <- paste0(
   collapse = " + "
 )
 optional_terms <- c(
-  "yeardx_centered",
   # neoadjuvant, stage and surgery are correlated
   "I_neoadjuvant : I_stage_34", "I_surgery : I_stage_34",
   "I_surgery : I_neoadjuvant",
@@ -206,7 +205,7 @@ for (i in 1:length(formula_taxol)) {
   .std_diff_tbl <- psw(
     data = as.data.frame(ps_data),
     form.ps = formula_taxol[i],
-    weight = 'MW',
+    weight = "MW",
     std.diff = TRUE,
     V.name = tbl1_vars
   ) %>%
@@ -224,6 +223,7 @@ for (i in 1:length(formula_taxol)) {
   if (max(abs(.std_diff_after_wo_yeardx)) < M_taxol[2]) {
     M_taxol[2] <- max(abs(.std_diff_after_wo_yeardx))
     I_taxol[2] <- i
+    cat(I_taxol[2], "\n")
   }
 }
 
@@ -310,7 +310,7 @@ for (i in 1:length(formula_gcsf)) {
   .std_diff_tbl <- psw(
     data = as.data.frame(ps_data),
     form.ps = formula_gcsf[i],
-    weight = 'MW',
+    weight = "MW",
     std.diff = TRUE,
     V.name = tbl1_vars
   ) %>%
