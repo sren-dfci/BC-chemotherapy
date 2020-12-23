@@ -40,13 +40,15 @@ ps_data <- redcap_data[
   chemopg == 1 & pregnancy_outcome == "single", 
 ]
 
-best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 + I_surgery + I_neoadjuvant + yeardx_centered + neo_stage + surg_stage + gadx_surg + gadx_neo + tnbc_stage + tnbc_neo"
+best_formula_taxol <- "taxolpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
+I_surgery + I_neoadjuvant + neo_stage + gadx_tnbc + gadx_surg"
 
 best_formula_gcsf <- "gfpreg ~ I_HER2 + gadx_norm + I_TNBC + I_stage_34 +
-I_surgery + I_neoadjuvant + yeardx_centered + neo_stage + surg_neo + gadx_stage"
+I_surgery + I_neoadjuvant + surg_stage + gadx_tnbc +
+tnbc_stage + tnbc_neo"
 
 tbl1_vars <- c(
-  "age_norm", "gadx_norm", "yeardx_centered", "I_stage_34",
+  "age_norm", "gadx_norm", "I_stage_34",
   "I_TNBC", "I_HER2", "I_neoadjuvant", "I_surgery"
 )
 ```
@@ -92,13 +94,13 @@ In randomized experiments, subjects are randomly assigned to each treatment grou
 
 # Propensity score matching model
 
-In our study, there are two treatment effects that we want to evaluate: taxanes and colony stimulating factors (CSF). For each treatment, we built a logistic regression, with the treatment as the dependent variable and patient characteristics as confounders. By fitting this model, we obtained the probability of receiving taxane/CSF for each subject, and rebalanced the confounders accordingly. The confounders are selected from Table 1, which include: age at diagnosis, gestational age at diagnosis, year of diagnosis, cancer stage, cancer type, timing of chemotherapy and whether they had breast surgery during pregnancy. The performance of rebalancing were evaluated by the standardized difference of each confounder. Standardized difference is a measure of the effect size of covariates between two groups. Generally speaking, it calculates the difference in means divided by standard error. There is no specific threshold, but an absolute effect size between 0\% and 10\% is usually considered small. 
+In our study, there are two treatment effects that we want to evaluate: taxanes and colony stimulating factors (CSF). For each treatment, we built a logistic regression, with the treatment as the dependent variable and patient characteristics as confounders. By fitting this model, we obtained the probability of receiving taxane/CSF for each subject, and rebalanced the confounders accordingly. The confounders are selected from Table 1, which include: age at diagnosis, gestational age at diagnosis, cancer stage, cancer type, timing of chemotherapy and whether they had breast surgery during pregnancy. The performance of rebalancing were evaluated by the standardized difference of each confounder. Standardized difference is a measure of the effect size of covariates between two groups. Generally speaking, it calculates the difference in means divided by standard error. There is no specific threshold, but an absolute effect size between 0\% and 10\% is usually considered small. 
 
 We also added several interaction terms to the logistic models. To decide which interaction terms should be added, we listed all the possible two-way interaction combinations, fitted corresponding models and compared model performance by the largest standardized difference in each model. There are also several choices of weighting shcemes. We compared two weights in this study: average treatment effect weight (ATE) and matching weight (MW). For both treatments, MW provides smaller overall standardized differences, so we use MW in all the following results. The formulas we used to get the best performances are:
 
-For taxane: I(taxane = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + year of diganosis + I(timing = neoadjuvant) \* I(stage = 3,4) + I(surgery = 1) \* I(stage = 3,4) + gestational age \* I(surgery = 1) + gestational age \* I(timing = neoadjuvant) + I(type = TNBC) \* I(stage = 3,4) + I(type = TNBC) \* I(timing = neoadjuvant)
+For taxane: I(taxane = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + I(timing = neoadjuvant) \* I(stage = 3,4) + gestational age \* I(type = TNBC) + gestational age \* I(surgery = 1)
 
-For CSF: I(CSF = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + year of diagnosis + I(timing = neoadjuvant) \* I(stage = 3,4) + I(surgery = 1) \* I(timing = neoadjuvant) + gestational age \* I(stage = 3,4)
+For CSF: I(CSF = 1) ~ I(type = HER2) + I(type = TNBC) + gestational age + I(stage = 3,4) + I(surgery = 1) + I(timing = neoadjuvant) + I(surgery = 1) \* I(stage = 3,4) + gestational age \* I(type = TNBC) + I(type = TNBC) \* I(stage = 3,4) + I(stage = 3,4) \* I(timing = neoadjuvant)
 
 ```{r ps model, fig.show = "hide" } 
 best_model_taxol <- psw(
@@ -125,8 +127,8 @@ ps_data[, w_gcsf_mw := best_model_gcsf$W]
 taxol_coefs <- as.data.frame(summary(best_model_taxol$ps.model)$coefficients)
 taxol_coefs$covariate <- c(
   "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
-  "Neoadjuvant", "Year of diagnosis", "Neoadjuvant*Stage", "Surgery*Stage", 
-  "Gestational age*Surgery", "Gestational age*Neoadjuvant", "TNBC*Stage", "TNBC*Neoadjuvant"
+  "Neoadjuvant", "Neoadjuvant*Stage", "Gestational age*TNBC",
+  "Gestational age*Surgery"
 )
 taxol_coefs %>%
   mutate(
@@ -153,8 +155,8 @@ taxol_coefs %>%
 gcsf_coefs <- as.data.frame(summary(best_model_gcsf$ps.model)$coefficients)
 gcsf_coefs$covariate <- c(
   "Intercept", "HER2", "Gestational age", "TNBC", "Stage", "Surgery",
-  "Neoadjuvant", "Year of diagnosis", "Neoadjuvant*Stage", "Surgery*Neoadjuvant",
-  "Gestational age*Stage"
+  "Neoadjuvant", "Surgery*Stage", "Gestational age*TNBC", 
+  "TNBC*Stage", "TNBC*Neoadjuvant"
 )
 gcsf_coefs %>%
   mutate(
@@ -186,7 +188,6 @@ diff.plot(
   name = c(
     "Age",
     "Gestational age",
-    "Year of diagnosis",
     "Stage",
     "TNBC",
     "HER2",
@@ -203,7 +204,6 @@ diff.plot(
   name = c(
     "Age",
     "Gestational age",
-    "Year of diagnosis",
     "Stage",
     "TNBC",
     "HER2",
@@ -438,6 +438,28 @@ ATE_overall %>%
   )
 ```
 
+```{r, eval = FALSE}
+ps_data[, .N, by = c("year_grp", "gestational_sens")][
+  order(year_grp, )
+] %>%
+  pivot_wider(names_from = gestational_sens, values_from = N)
 
+ps_data[, .N, by = c("year_grp", "obstetrical_sens")][
+  order(year_grp, )
+] %>%
+  pivot_wider(names_from = obstetrical_sens, values_from = N)
+
+ggplot(ps_data, aes(yeardx, fill = as.factor(taxolpreg))) +
+  stat_bin(geom = "bar", binwidth = 1, position = position_dodge()) + 
+  facet_grid(taxolpreg ~ .) + 
+  scale_y_continuous(breaks = seq(0, 8, by = 2)) +
+  labs(x = "Year of diagnosis", y = "Count", fill = "Taxol")
+
+ggplot(ps_data, aes(yeardx, fill = as.factor(gfpreg))) +
+  stat_bin(geom = "bar", binwidth = 1, position = position_dodge()) + 
+  facet_grid(gfpreg ~ .) + 
+  scale_y_continuous(breaks = seq(0, 8, by = 2)) +
+  labs(x = "Year of diagnosis", y = "Count", fill = "GCSF")
+```
 
 
