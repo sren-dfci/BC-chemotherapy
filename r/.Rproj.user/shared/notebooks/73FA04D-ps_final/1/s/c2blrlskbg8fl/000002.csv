@@ -1,3 +1,0 @@
-"0","# load packages and functions needed
-source(file.path(code_path, ""functions.R""))
-"
