@@ -21,7 +21,7 @@ df <- df %>% mutate(
 )
 
 # table 1 changes
-# Impute gestational age at diagnosis by gestational age at surgery and 
+# Impute gestational age at diagnosis by gestational age at surgery and
 # weeks between diagnosis and surgery
 df <- df %>%
   mutate(gadx = ifelse(
@@ -31,24 +31,26 @@ df <- df %>%
   )) %>%
   mutate(gadx = ifelse(gadx < 0, 0, gadx))
 # Categorize year of diagnosis
-df <- df %>% 
-  mutate(year_cat = case_when(
-    yeardx <= 2000 ~ "before 2000",
-    2000 < yeardx & yeardx <= 2005 ~ "2000-2005",
-    2005 < yeardx & yeardx <= 2010 ~ "2005-2010",
-    2010 < yeardx & yeardx <= 2015 ~ "2010-2015",
-    2015 < yeardx ~ "2015+"
-  )) %>% 
-  mutate(year_cat = factor(
-    year_cat,
-    levels = c(
-      "before 2000", "2000-2005", "2005-2010",
-      "2010-2015", "2015+"
+df <- df %>%
+  mutate(
+    year_cat = case_when(
+      yeardx <= 2000 ~ "before 2000",
+      2000 < yeardx & yeardx <= 2005 ~ "2000-2005",
+      2005 < yeardx & yeardx <= 2010 ~ "2005-2010",
+      2010 < yeardx & yeardx <= 2015 ~ "2010-2015",
+      2015 < yeardx ~ "2015+"
     ),
-    ordered = TRUE
-  ))
+    year_cat = factor(
+      year_cat,
+      levels = c(
+        "before 2000", "2000-2005", "2005-2010",
+        "2010-2015", "2015+"
+      ),
+      ordered = TRUE
+    )
+  )
 # Stage 0 is missing
-df <- df %>% 
+df <- df %>%
   mutate(stage = ifelse(stage == 0, NA, stage))
 # cancer type
 df <- df %>%
