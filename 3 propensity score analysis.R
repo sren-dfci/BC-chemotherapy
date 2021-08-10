@@ -4,11 +4,11 @@ packages_list <- c(
 lapply(packages_list, library, character.only = TRUE)
 select <- dplyr::select
 
-source("/Users/siyangren/Dropbox (Partners HealthCare)/code repository/Functions/R-functions/CreateSummaryTable.R")
+source("C:/Users/sren/Dropbox (Partners HealthCare)/code repository/Functions/R-functions/CreateSummaryTable.R")
 
 
 d_path <- file.path(
-  "/Users/siyangren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
 )
 setwd(d_path)
 

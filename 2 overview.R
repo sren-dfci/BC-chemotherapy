@@ -40,7 +40,7 @@ tbl1_vars <- c(
   "mutation", "chemoga", "chemo_timing", "chemo", "gcsf", "surgpg"
 )
 summaryTable(df, tbl1_vars, "chemopg", .digits = 1)
-summaryTable(df, tbl1_vars, "taxolpreg", .digits = 1)
+summaryTable(df %>% filter(chemopg == 1), tbl1_vars, "taxolpreg", .digits = 1)
 
 
 # Table 2
