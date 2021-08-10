@@ -11,7 +11,6 @@ d_path <- file.path(
   "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
 )
 setwd(d_path)
-
 load(file.path("2021-7-19", "data_clean.RData"))
 
 # patients received chemotherapy and gave single birth
@@ -97,6 +96,40 @@ gcsf_coefs %>%
   select(est.or, lower, upper, `Pr(>|z|)`)
 
 # Std diff plots
+
+diff.plot <- function(diff.before, diff.after, name, weight, title = NULL) {
+  # plot standardize difference for before and after weighting
+  #
+  # Args:
+  #   diff.before: standardized mean differece before weighting
+  #   diff.after: standardized mean difference after weighting
+  #   name: covariate name
+  #   weight: propensity score weighting method
+  # Returns
+  #   A plot is generated
+
+  par(las = 1, lwd = 2, mar = c(5, max(nchar(name)), 4, 2), bty = "n")
+
+  x.range <- range(c(diff.before, diff.after))
+  y.range <- c(1, length(name))
+  ord <- order(diff.before, decreasing = T)
+  plot(
+    x = x.range, y = y.range, xaxt = "n", yaxt = "n", type = "n",
+    xlim = x.range, ylim = y.range,
+    ylab = "", xlab = "Standardized mean difference",
+    main = title
+  )
+  axis(side = 1, at = pretty(x.range))
+  axis(side = 2, at = length(name):1, labels = name[ord], tick = F)
+  abline(v = 0, lty = 1, col = "gray")
+  abline(v = -10, lty = 3, lwd = 1)
+  abline(v = 10, lty = 3, lwd = 1)
+  points(y = length(name):1, x = diff.before[ord], pch = 4)
+  points(y = length(name):1, x = diff.after[ord], pch = 21)
+  legend("topleft", legend = c("Unadjusted", weight), pch = c(4, 21))
+}
+
+
 diff.plot(
   diff.before = best_model_taxol$std.diff.before[, "std.diff.pct"],
   diff.after = best_model_taxol$std.diff.after[, "std.diff.pct"],
@@ -129,15 +162,56 @@ diff.plot(
   title = "Adjusted for CSF"
 )
 
-## MI
-mice_fit_ls <- sapply(
-  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
-  function(outc) {
-    vars <- c(tbl1_vars, outc)
-    .sub_data <- df_s %>% select(all_of(vars))
+## Average trt effect models with original dataset, with MI datasets
+weighted_glm_fit <- function(.df, .outcome, .trt, .weight) {
+  .glm <- do.call("glm", list(
+    formula = paste0(.outcome, " ~ ", .trt),
+    family = binomial,
+    data = .df,
+    weights = .df[[.weight]]
+  ))
+  log_odds <- summary(.glm)$coefficients[.trt, "Estimate"]
+  log_odds_var <- sandwich(.glm)[.trt, .trt]
+  tmp <- c(
+    "log_or" = log_odds,
+    "var_log_or" = log_odds_var
+  )
+  return(tmp)
+}
+# ATE modesl with original dataset
+outcome_vars <- c(
+  "obstetrical", "gestational", "obstetrical_sens", "gestational_sens"
+)
+weight_vars <- c("w_taxol_mw", "w_gcsf_mw")
+# cbind(df_s$w_taxol_mw, df_s$w_gcsf_mw)
+trt_vars <- c("taxolpreg", "gfpreg")
+
+ate_results <- vector("list", length(outcome_vars))
+names(ate_results) <- outcome_vars
+for (o in outcome_vars) {
+  for (i in 1:2) {
+    trt <- trt_vars[i]
+    w <- weight_vars[i]
+    tmp <- weighted_glm_fit(df_s, o, trt, w)
+    tmp["est_or"] <- exp(tmp["log_or"])
+    tmp["lower_or"] <- exp(tmp["log_or"] - 1.96 * sqrt(tmp["var_log_or"]))
+    tmp["upper_or"] <- exp(tmp["log_or"] + 1.96 * sqrt(tmp["var_log_or"]))
+    ate_results[[o]][[trt]] <- tmp[c("est_or", "lower_or", "upper_or")]
+  }
+}
+
+ate_results <- lapply(ate_results, do.call, what = "rbind")
+  
+# ATE modesl with MIs
+# get multiple imputed datasets first
+df_imputed <- sapply(
+  outcome_vars,
+  function(o) {
+    vars <- c(tbl1_vars, o)
+    .df_subcols <- df_s %>% select(all_of(vars))
     # mice object
     .fit <- mice(
-      data = .sub_data,
+      data = .df_subcols,
       m = 10, # number of MIs
       maxit = 25, # iteration
       seed = 42,
@@ -146,10 +220,10 @@ mice_fit_ls <- sapply(
     # imputed datasets
     imputed <- mice::complete(.fit, "all") # a list
     # add two treatments two the list
-    imputed <- lapply(imputed, function(.data) {
-      .data$taxolpreg <- df_s$taxolpreg
-      .data$gfpreg <- df_s$gfpreg
-      return(.data)
+    imputed <- lapply(imputed, function(.df) {
+      .df$taxolpreg <- df_s$taxolpreg
+      .df$gfpreg <- df_s$gfpreg
+      return(.df)
     })
     return(imputed)
   },
@@ -157,128 +231,55 @@ mice_fit_ls <- sapply(
   USE.NAMES = TRUE
 )
 
-# Average treatment effect model
-ATE_composite <- sapply(
-  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
-  function(outc) {
-    sapply(c("taxolpreg", "gfpreg"), function(trt) {
-      w <<- if (trt == "taxolpreg") df_s$w_taxol_mw else df_s$w_gcsf_mw
-      # outc ~ trt
-      .glm <- glm(
-        formula = paste0(outc, " ~ ", trt),
-        family = binomial,
-        data = df_s,
-        weights = w
-      )
-      # extract coefs
-      .log_odds <- summary(.glm)$coefficients[trt, "Estimate"]
-      .log_odds_var <- sandwich(.glm)[trt, trt]
-      return(data.frame(
-        est.log.or = .log_odds,
-        std.log.or = sqrt(.log_odds_var)
-      ))
-    }, simplify = FALSE, USE.NAMES = TRUE) %>%
-      rbindlist(., idcol = "Treatment")
-  },
-  simplify = FALSE, USE.NAMES = TRUE
-) %>%
-  rbindlist(., idcol = "Outcome") %>%
-  mutate(
-    est.or = exp(est.log.or),
-    lower = exp(est.log.or - 1.96 * std.log.or),
-    upper = exp(est.log.or + 1.96 * std.log.or)
-  ) %>%
-  arrange(Treatment, Outcome)
+ate_mi_results <- vector("list", length(outcome_vars))
+names(ate_mi_results) <- outcome_vars
+# a list, with each outcome as an element
+# then each treatment as a sub-element
+# each treatment contains a 10*2 matrix, row is iter, col is odds ratio
+for (o in outcome_vars) {
+  .ls <- df_imputed[[o]]
+  for (i in 1:2) {
+    trt <- trt_vars[i]
+    w <- weight_vars[i]
+    placeholder <- matrix(nrow = 10, ncol = 2)
+    colnames(placeholder) <- c("log_or", "var_log_or")
+    ate_mi_results[[o]][[trt]] <- placeholder
+    for (j in 1:10) {
+      .df <- .ls[[j]]
+      tmp <- weighted_glm_fit(.df, o, trt, w)
+      ate_mi_results[[o]][[trt]][j, ] <- tmp
+    }
+  }
+}
 
-ATE_composite_MI <- sapply(
-  c("obstetrical", "gestational", "obstetrical_sens", "gestational_sens"),
-  function(outc) {
-    .ls <- mice_fit_ls[[outc]]
-    # tmp is a dataframe, with 10 iterations and 2 treatments
-    tmp <- lapply(.ls, function(.data) {
-      # taxane
-      tmp1 <- {
-        .glm <- glm(
-          paste0(outc, " ~ taxolpreg"),
-          family = binomial,
-          data = .data,
-          weights = df_s$w_taxol_mw
-        )
-        .log_odds <- summary(.glm)$coefficients["taxolpreg", "Estimate"]
-        .log_odds_var <- sandwich(.glm)["taxolpreg", "taxolpreg"]
-        # return
-        data.frame(
-          Treatment = "taxolpreg",
-          log.or = .log_odds,
-          log.or.var = .log_odds_var
-        )
-      }
-      # CSF
-      tmp2 <- {
-        .glm <- glm(
-          paste0(outc, " ~ gfpreg"),
-          family = binomial,
-          data = .data,
-          weights = df_s$w_gcsf_mw
-        )
-        .log_odds <- summary(.glm)$coefficients["gfpreg", "Estimate"]
-        .log_odds_var <- sandwich(.glm)["gfpreg", "gfpreg"]
-        # return
-        data.frame(
-          Treatment = "gfpreg",
-          log.or = .log_odds,
-          log.or.var = .log_odds_var
-        )
-      }
-      # combine taxane and CSF
-      return(
-        rbind(tmp1, tmp2)
-      )
-    }) %>%
-      rbindlist(., idcol = "Iter")
-    # combine stats over 10 imputed datasets
-    tmp <- tmp %>%
-      group_by(Treatment) %>%
-      summarise(
-        est.log.or = PoolEstimates(log.or, log.or.var)[1],
-        std.log.or = sqrt(PoolEstimates(log.or, log.or.var)[2])
-      ) %>%
-      mutate(
-        est.or = exp(est.log.or), # convert from coef to odds ratio
-        lower = exp(est.log.or - 1.96 * std.log.or),
-        upper = exp(est.log.or + 1.96 * std.log.or)
-      ) %>%
-      as.data.frame()
-    return(tmp)
-  },
-  simplify = FALSE,
-  USE.NAMES = TRUE
-) %>%
-  rbindlist(., idcol = "Outcome") %>%
-  mutate(Outcome = paste0(Outcome, "_mi")) %>%
-  arrange(Outcome, Treatment)
+PoolEstimates <- function(Q, U) {
+  # Q is point estimate
+  # U is variance estimate
+  if (length(Q) != length(U)) {
+    stop("Q and U are of different length")
+  }
+  m <- length(Q)
+  Q_bar <- mean(Q)
+  U_bar <- mean(U) # within-imputation variance
+  B <- var(Q) # between-imputation variance
+  tt <- U_bar + (1 + 1 / m) * B # total variance
+  .tmp <- c(Q_bar, tt)
+  names(.tmp) <- c("Q_bar", "total_variance")
+  return(.tmp)
+}
 
-ATE_overall <- rbind(
-  ATE_composite %>%
-    select(Outcome, Treatment, est.or, lower, upper),
-  ATE_composite_MI %>%
-    select(Outcome, Treatment, est.or, lower, upper)
-)
+# Pool the point estimate and var estimate of all iters
+ate_mi_results <- lapply(ate_mi_results, function(.ls) {
+  lapply(.ls, function(.matrix) {
+    tmp <- PoolEstimates(.matrix[, "log_or"], .matrix[, "var_log_or"])
+    tmp["log_or"] <- tmp["Q_bar"]
+    tmp["sd_log_or"] <- sqrt(tmp["total_variance"])
+    tmp["est_or"] <- exp(tmp["log_or"])
+    tmp["lower_or"] <- exp(tmp["log_or"] - 1.96 * tmp["sd_log_or"])
+    tmp["upper_or"] <- exp(tmp["log_or"] + 1.96 * tmp["sd_log_or"])
+    return(tmp[c("est_or", "lower_or", "upper_or")])
+  })
+})
 
-# For taxane
-# taxane and obstetrical
-ATE_overall %>%
-  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^obs")) %>%
-  select(Outcome, est.or, lower, upper)
-# taxane and gestational
-ATE_overall %>%
-  filter(Treatment == "taxolpreg" & str_detect(Outcome, "^ges")) %>%
-  select(Outcome, est.or, lower, upper)
-# GCSF and obstetrical
-ATE_overall %>%
-  filter(Treatment == "gfpreg" & str_detect(Outcome, "^obs")) %>%
-  select(Outcome, est.or, lower, upper)
-# GCSF and gestational
-ATE_overall %>%
-  filter(Treatment == "gfpreg" & str_detect(Outcome, "^ges")) %>%
-  select(Outcome, est.or, lower, upper)
+# collapse sub-list into a matrix
+ate_mi_results <- lapply(ate_mi_results, do.call, what = "rbind")
