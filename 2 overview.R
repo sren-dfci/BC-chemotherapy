@@ -31,6 +31,12 @@ tbl_3_factor_vars <- c(
 df <- df %>%
   mutate(across(all_of(tbl_3_factor_vars), as.factor))
 
+tbl_4_factor_vars <- c("obstetrical_sens", "gestational_sens")
+df <- df %>%
+  mutate(across(all_of(tbl_4_factor_vars), as.factor))
+
+
+
 
 # --- Generate tables --- #
 
