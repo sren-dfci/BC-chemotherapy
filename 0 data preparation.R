@@ -122,6 +122,28 @@ df <- df %>%
 
 
 # Composite outcomes
+# update 20210915: add a single composite outcome, exclude gestational
+# hypertesion and gestational diabetes
+df$composite <- apply(
+  df %>% select(sptb, pprom, chorio, sga, apgar5v7, anomalies),
+  1,
+  function(x) {
+    ifelse(all(is.na(x)), NA, as.numeric(sum(x, na.rm = TRUE) > 0))
+  }
+)
+df$composite_sens <- apply(
+  df %>% select(sptb, pprom, chorio, sga, apgar5v7, anomalies),
+  1,
+  function(x) {
+    ifelse(sum(x, na.rm = TRUE) > 0, # if any individual outcome is 1
+      1, # define as 1
+      ifelse(sum(is.na(x)) > 0, # else if any is NA
+        NA, # define as NA
+        0
+      )
+    )
+  }
+)
 # four options
 # primary analysis: composite outcome is missing only if
 # all individual outcomes are missing
@@ -178,5 +200,9 @@ df$gestational_sens <- apply(
 # check the outcomes
 df %>% distinct(sptb, pprom, gdm, pih, chorio, obstetrical, obstetrical_sens)
 
+df %>%
+  distinct(
+    sptb, pprom, chorio, sga, apgar5v7, anomalies, composite, composite_sens
+  )
 
-save(df, file = file.path(d_path, "2021-7-19", "data_clean.RData"))
+save(df, file = file.path(d_path, "2021-7-19", "data_clean_210915.RData"))

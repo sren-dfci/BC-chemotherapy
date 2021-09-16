@@ -1,5 +1,5 @@
 packages_list <- c(
-  "data.table", "tidyverse", "kableExtra", "PSW", "MASS", "sandwich", "mice"
+  "data.table", "tidyverse", "PSW", "MASS", "sandwich", "mice"
 )
 lapply(packages_list, library, character.only = TRUE)
 select <- dplyr::select
@@ -11,7 +11,8 @@ d_path <- file.path(
   "/Users/siyangren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
 )
 setwd(d_path)
-load(file.path("2021-7-19", "data_clean.RData"))
+load(file.path("2021-7-19", "data_clean_210915.RData"))
+
 
 # patients received chemotherapy and gave single birth
 df_s <- df %>%
@@ -163,6 +164,8 @@ diff.plot(
 )
 
 ## Average trt effect models with original dataset, with MI datasets
+# update 20210915, combine obstetrical outcome and gestational outcome
+# into a single composite outcome
 weighted_glm_fit <- function(.df, .outcome, .trt, .weight) {
   .glm <- do.call("glm", list(
     formula = paste0(.outcome, " ~ ", .trt),
@@ -182,6 +185,7 @@ weighted_glm_fit <- function(.df, .outcome, .trt, .weight) {
 outcome_vars <- c(
   "obstetrical", "gestational", "obstetrical_sens", "gestational_sens"
 )
+outcome_vars <- c("composite", "composite_sens")
 weight_vars <- c("w_taxol_mw", "w_gcsf_mw")
 # cbind(df_s$w_taxol_mw, df_s$w_gcsf_mw)
 trt_vars <- c("taxolpreg", "gfpreg")
@@ -201,7 +205,7 @@ for (o in outcome_vars) {
 }
 
 ate_results <- lapply(ate_results, do.call, what = "rbind")
-  
+
 # ATE modesl with MIs
 # get multiple imputed datasets first
 df_imputed <- sapply(
