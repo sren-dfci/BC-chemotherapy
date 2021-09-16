@@ -31,6 +31,12 @@ tbl_3_factor_vars <- c(
 df <- df %>%
   mutate(across(all_of(tbl_3_factor_vars), as.factor))
 
+tbl_4_factor_vars <- c("obstetrical_sens", "gestational_sens")
+df <- df %>%
+  mutate(across(all_of(tbl_4_factor_vars), as.factor))
+
+
+
 
 # --- Generate tables --- #
 
@@ -40,7 +46,7 @@ tbl1_vars <- c(
   "mutation", "chemoga", "chemo_timing", "chemo", "gcsf", "surgpg"
 )
 summaryTable(df, tbl1_vars, "chemopg", .digits = 1)
-summaryTable(df, tbl1_vars, "taxolpreg", .digits = 1)
+summaryTable(df %>% filter(chemopg == 1), tbl1_vars, "taxolpreg", .digits = 1)
 
 
 # Table 2
