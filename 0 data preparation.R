@@ -34,17 +34,18 @@ df <- df %>%
 df <- df %>%
   mutate(
     year_cat = case_when(
-      yeardx <= 2000 ~ "before 2000",
-      2000 < yeardx & yeardx <= 2005 ~ "2000-2005",
-      2005 < yeardx & yeardx <= 2010 ~ "2005-2010",
-      2010 < yeardx & yeardx <= 2015 ~ "2010-2015",
-      2015 < yeardx ~ "2015+"
+      yeardx < 2000 ~ "before 2000",
+      2000 <= yeardx & yeardx < 2005 ~ "2000-2005",
+      2005 <= yeardx & yeardx < 2010 ~ "2005-2010",
+      2010 <= yeardx & yeardx < 2015 ~ "2010-2015",
+      2015 <= yeardx & yeardx < 2020 ~ "2015-2020",
+      yeardx >= 2020 ~ "2020+"
     ),
     year_cat = factor(
       year_cat,
       levels = c(
         "before 2000", "2000-2005", "2005-2010",
-        "2010-2015", "2015+"
+        "2010-2015", "2015-2020", "2020+"
       ),
       ordered = TRUE
     )
@@ -88,6 +89,9 @@ df <- df %>%
     acpreg == 1 & taxolpreg == 1 ~ "ac_taxane",
     acpreg == 0 & taxolpreg == 1 ~ "taxane_only"
   ))
+# dose densed AC
+df <- df %>% rename(dose_dense_ac = ddacpreg)
+
 
 # table 2 changes
 # pregnancy outcome
