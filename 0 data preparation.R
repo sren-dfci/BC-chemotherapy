@@ -1,7 +1,7 @@
 library(tidyverse)
 
 d_path <- file.path(
-  "/Users/siyangren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
+  "C:/Users/sren/Dropbox (Partners HealthCare)/BOC shared/Chemo during pregnancy (Sella)/data"
 )
 setwd(d_path)
 df <- read.csv(
@@ -9,6 +9,7 @@ df <- read.csv(
 )
 
 # exclude record ID 26, 56, 128
+names(df)[1] <- "record_id"
 df <- df %>%
   filter(!record_id %in% c(26, 56, 128))
 # gestational age at checmotherapy initiation is not numeric
@@ -96,25 +97,32 @@ df <- df %>% rename(dose_dense_ac = ddacpreg)
 # table 2 changes
 # pregnancy outcome
 df <- df %>%
-  mutate(pregnancy_outcome = case_when(
-    twin == 0 ~ "single",
-    twin == 1 ~ "double",
-    outcomepg == "TAB" ~ "termination",
-    outcomepg == "SAB" ~ "spontaneous",
-    is.na(twin) & is.na(outcomepg) ~ as.character(NA)
-  ))
-# preterm birth
-df <- df %>%
-  mutate(preterm_birth_outcome = ifelse(ptd == 0, ">=37", "<37"))
-# for those <37
-df <- df %>%
-  mutate(preterm_birth_reason = case_when(
-    ptd == 0 ~ "Not applicable",
-    ptd == 1 & sptb == 1 ~ "Spontaneous",
-    ptd == 1 & indptb == 1 ~ "Medical",
-    ptd == 1 & iatptb == 1 ~ "Iatrogenic",
-    TRUE ~ "Unknown"
-  ))
+  mutate(
+    pregnancy_outcome = case_when(
+      twin == 0 ~ "single birth",
+      twin == 1 ~ "double birth",
+      outcomepg == "TAB" ~ "therapeutic abortion",
+      outcomepg == "SAB" ~ "spontaneous abortion",
+      TRUE ~ as.character(NA)
+    ),
+    preterm_birth = case_when(
+      pregnancy_outcome %in% c("single birth", "double birth") &
+        ptd == 1 ~ "Y",
+      pregnancy_outcome %in% c("single birth", "double birth") &
+        ptd == 0 ~ "N",
+      pregnancy_outcome %in% c("single birth", "double birth") &
+        is.na(ptd) ~ "unknown",
+      !pregnancy_outcome %in% c("single birth", "double birth") ~ "NA"
+    ),
+    preterm_reason = case_when(
+      preterm_birth == "Y" & sptb == 1 ~ "spontaneous",
+      preterm_birth == "Y" & indptb == 1 ~ "Medically indicated",
+      preterm_birth == "Y" & iatptb == 1 ~ "Iatrogenic",
+      TRUE ~ "NA"
+    )
+  )
+
+
 
 # Table 3 changes
 df <- df %>%
@@ -209,4 +217,4 @@ df %>%
     sptb, pprom, chorio, sga, apgar5v7, anomalies, composite, composite_sens
   )
 
-save(df, file = file.path(d_path, "2021-7-19", "data_clean_210915.RData"))
+save(df, file = file.path(d_path, "2021-7-19", "data_clean_211022.RData"))

@@ -7,7 +7,7 @@ d_path <- file.path(
 )
 setwd(d_path)
 
-load(file.path("2021-7-19", "data_clean.RData"))
+load(file.path("2021-7-19", "data_clean_211022.RData"))
 
 # --- factor vars need to be factor class --- #
 # table 1 factor vars
@@ -19,7 +19,7 @@ df <- df %>%
   mutate(across(all_of(tbl_1_factor_vars), as.factor))
 # table 2 factor vars
 tbl_2_factor_vars <- c(
-  "pregnancy_outcome", "preterm_birth_outcome", "preterm_birth_reason"
+  "pregnancy_outcome", "preterm_birth", "preterm_reason"
 )
 df <- df %>%
   mutate(across(all_of(tbl_2_factor_vars), as.factor))
@@ -48,11 +48,16 @@ tbl1_vars <- c(
 summaryTable(df, tbl1_vars, "chemopg", .digits = 1)
 summaryTable(df %>% filter(chemopg == 1), tbl1_vars, "taxolpreg", .digits = 1)
 
+table(df$surgpg, df$year_cat)
+table(df$chemo, df$year_cat)
+table(df$gcsf, df$year_cat)
+table(df$surgpg, df$year_cat)
+
 
 # Table 2
 tbl2_vars <- c(
   "delga", "pregnancy_outcome",
-  "preterm_birth_outcome", "preterm_birth_reason"
+  "preterm_birth", "preterm_reason"
 )
 summaryTable(df, tbl2_vars, "chemopg", .digits = 1)
 
